@@ -1,0 +1,42 @@
+*.iml
+.gradle/
+local.properties
+.idea/
+.kotlin/
+build/
+captures/
+.externalNativeBuild/
+.cxx/
+release/
+*.apk
+*.aab
+*.keystore
+*.jks
+.DS_Store
+/captures/
+*.pcap
+*.pcapng
+exports/
+
+# Local tool state: machine-specific paths and per-user permission grants, never shared.
+.claude/settings.local.json
+
+# Collected data must never reach the repository. These are what an on-device pull produces.
+*.db
+*.db-wal
+*.db-shm
+signalscope*.db*
+
+# PMTiles archives are large and regenerable
+*.pmtiles
+
+# ...except the bundled world basemap, which is the reason the map is never blank on first
+# run. 6 MB, z0-4, cut from the Protomaps planet; regenerate with tools/make_world_basemap.sh.
+!app/src/main/assets/region-world.pmtiles
+
+# Agent worktrees live inside the project dir; they are checkouts, not content.
+.claude/worktrees/
+
+# Device- and region-specific analysis of the reference handset. Identifies its owner's carrier,
+# country, masts and movements, so it stays on this machine and never reaches the public repo.
+private/

@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SignalScope · Coverage map prototype</title>
+
+<!--
+  SignalScope — coverage map prototype
+  ====================================
+  Proves the basemap stack from docs/map-stack.md actually works:
+
+    MapLibre GL JS 5.6.1  (pinned)      — same renderer family as MapLibre GL Native on Android
+    OpenFreeMap "dark" style            — keyless, no account, OSM-derived, ODbL
+    h3-js 4.5.0 (pinned)                — real H3 indices and real H3 geometry
+
+  This file MUST be opened as a local file (or from a local static server).
+  It CANNOT be published as a Claude Artifact: artifacts run under a CSP that
+  blocks fetch/XHR to arbitrary hosts, so the MapLibre bundle would load but every
+  tile request to tiles.openfreemap.org would be silently blocked and the map
+  would render as an empty dark rectangle with hexes floating on it — i.e. exactly
+  the thing this prototype exists to stop doing.
+
+  Bin resolution is ADAPTIVE and DERIVED, per docs/adaptive-aggregation.md.
+  Storage is res 10 throughout; the merge walk below is the real rule, not a
+  hand-placed mixture of hex sizes.
+-->
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.css" rel="stylesheet">
+
+<style>
+  :root {
+    --page:      #07090d;
+    --surface:   #151a22;
+    --surface-2: #1b212b;
+    --surface-3: #222936;
+    --line:      #242c38;
+    --line-soft: #1b222c;
+
+    --text:      #e9edf4;
+    --dim:       #8e99ab;
+    --faint:     #5c6677;
+
+    --brand:     #4da3ff;
+    --good:      #3ddc97;
+    --warn:      #ffb648;
+    --bad:       #ff6b6b;
+    --nr:        #b388ff;
+
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+
+    --glass: rgba(10,13,18,.9);
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; background: var(--page); color: var(--text);
+    font-family: var(--sans); font-size: 13px; line-height: 1.45;
+    -webkit-font-smoothing: antialiased; overflow: hidden;
+  }
+
+  #map { position: absolute; inset: 0; }
+
+  /* MapLibre chrome, restyled to the app's language */
+  .maplibregl-ctrl-attrib {
+    background: rgba(7,9,13,.86) !important;
+    color: var(--dim) !important;
+    font-family: var(--mono) !important; font-size: 10px !important;
+    border-radius: 7px 0 0 0; padding: 3px 8px !important;
+  }
+  .maplibregl-ctrl-attrib a { color: var(--dim) !important; text-decoration: none; }
+  .maplibregl-ctrl-attrib a:hover { color: var(--text) !important; }
+  .maplibregl-ctrl-group {
+    background: var(--glass) !important;
+    border: 1px solid var(--line) !important;
+    box-shadow: 0 8px 24px -8px rgba(0,0,0,.8) !important;
+  }
+  .maplibregl-ctrl-group button + button { border-top: 1px solid var(--line) !important; }
+  .maplibregl-ctrl-group button span { filter: invert(1) opacity(.72); }
+
+  /* ---------- panels ---------- */
+
+  .panel {
+    position: absolute; z-index: 5;
+    background: var(--glass);
+    -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+    border: 1px solid var(--line); border-radius: 16px;
+    box-shadow: 0 26px 60px -22px rgba(0,0,0,.95);
+  }
+
+  #left  { top: 14px; left: 14px; width: 332px; max-height: calc(100% - 28px);
+           display: flex; flex-direction: column; overflow: hidden; }
+
+  /* Right-hand column: the thesis readout, then the bin detail sheet under it. */
+  #rightcol {
+    position: absolute; z-index: 5; top: 14px; right: 14px; bottom: 46px; width: 306px;
+    display: flex; flex-direction: column; gap: 10px; pointer-events: none;
+  }
+  #rightcol > .panel { position: static; pointer-events: auto; }
+  #right { padding: 11px 12px; flex: 0 0 auto; }
+  #sheet { padding: 13px 14px; overflow-y: auto; flex: 0 1 auto; display: none; }
+  #sheet.on { display: block; }
+
+  .phead { padding: 13px 14px 11px; border-bottom: 1px solid var(--line-soft); }
+  .eyebrow {
+    font-family: var(--mono); font-size: 10px; font-weight: 600;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--brand);
+    margin-bottom: 7px;
+  }
+  .phead h1 { margin: 0; font-size: 18px; font-weight: 700; letter-spacing: -.022em; }
+  .phead .sub {
+    font-family: var(--mono); font-size: 10.5px; color: var(--faint);
+    margin-top: 5px; line-height: 1.5;
+  }
+
+  .pbody { padding: 12px 14px 14px; overflow-y: auto; }
+  .pbody::-webkit-scrollbar, #sheet::-webkit-scrollbar { width: 7px; }
+  .pbody::-webkit-scrollbar-thumb, #sheet::-webkit-scrollbar-thumb {
+    background: var(--surface-3); border-radius: 4px;
+  }
+
+  .sect { margin-bottom: 13px; }
+  .sect:last-child { margin-bottom: 0; }
+  .slab {
+    font-family: var(--mono); font-size: 9.5px; font-weight: 600;
+    letter-spacing: .14em; text-transform: uppercase; color: var(--faint);
+    margin-bottom: 7px;
+  }
+
+  .chips { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .chip {
+    font-size: 11.5px; font-weight: 500; text-align: center;
+    padding: 7px 6px; border-radius: 9px; cursor: pointer;
+    background: rgba(255,255,255,.035); border: 1px solid var(--line);
+    color: var(--dim); user-select: none; transition: .12s;
+  }
+  .chip:hover { background: rgba(255,255,255,.06); color: var(--text); }
+  .chip.on {
+    background: rgba(77,163,255,.16); border-color: rgba(77,163,255,.52);
+    color: #cfe4ff; font-weight: 600;
+  }
+
+  .toggles { display: flex; flex-direction: column; gap: 6px; }
+  .tg {
+    display: flex; align-items: center; gap: 8px; cursor: pointer;
+    font-size: 11.5px; color: var(--dim); user-select: none;
+  }
+  .tg input { accent-color: var(--brand); width: 13px; height: 13px; margin: 0; cursor: pointer; }
+  .tg:hover { color: var(--text); }
+
+  .legend { display: flex; flex-direction: column; gap: 4px; }
+  .lg {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11px; color: var(--dim); line-height: 1.3;
+  }
+  .lg i {
+    width: 11px; height: 12px; flex: 0 0 11px; display: block;
+    clip-path: polygon(50% 0, 100% 25%, 100% 75%, 50% 100%, 0 75%, 0 25%);
+  }
+  .lg .ct {
+    margin-left: auto; font-family: var(--mono); font-size: 9.5px; color: var(--faint);
+  }
+  .lg.off { opacity: .38; }
+  .lg.off .ct { font-style: normal; }
+
+  .note {
+    font-size: 11px; color: var(--dim); line-height: 1.5;
+    background: rgba(255,255,255,.03); border: 1px solid var(--line);
+    border-left: 2px solid var(--brand);
+    border-radius: 0 9px 9px 0; padding: 8px 10px;
+  }
+  .note.warn { border-left-color: var(--warn); }
+  .note.bad  { border-left-color: var(--bad); }
+  .note b { color: var(--text); font-weight: 600; }
+  .note .m { font-family: var(--mono); font-size: 10px; }
+
+  .resbar { display: flex; height: 7px; border-radius: 4px; overflow: hidden; margin-bottom: 7px; }
+  .resbar span { display: block; height: 100%; }
+  .resrow {
+    display: flex; justify-content: space-between;
+    font-family: var(--mono); font-size: 9.5px; color: var(--faint); padding: 1.5px 0;
+  }
+  .resrow b { color: var(--dim); font-weight: 500; }
+  .resrow .sw {
+    display: inline-block; width: 7px; height: 7px; border-radius: 2px; margin-right: 6px;
+  }
+
+  .jump { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
+  .jb {
+    font-family: var(--mono); font-size: 10px; letter-spacing: .02em;
+    padding: 6px 5px; text-align: center; border-radius: 8px; cursor: pointer;
+    background: rgba(255,255,255,.035); border: 1px solid var(--line); color: var(--dim);
+    user-select: none; transition: .12s; white-space: nowrap;
+  }
+  .jb:hover { background: rgba(255,255,255,.07); color: var(--text); }
+
+  .dev { font-family: var(--mono); font-size: 10px; color: var(--faint); line-height: 1.65; }
+  .dev b { color: var(--dim); font-weight: 500; }
+  .dev .hd {
+    font-size: 9.5px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--faint); margin-bottom: 7px;
+  }
+
+  /* ---------- detail sheet ---------- */
+
+  .shead { display: flex; justify-content: space-between; align-items: flex-start; gap: 9px;
+           padding-right: 20px; }
+  .hid { font-family: var(--mono); font-size: 10.5px; color: var(--faint); letter-spacing: .015em; }
+  .sname { font-size: 15px; font-weight: 600; letter-spacing: -.018em; margin-top: 4px; }
+  .tag {
+    font-family: var(--mono); font-size: 9px; font-weight: 600; letter-spacing: .1em;
+    padding: 3.5px 7px; border-radius: 6px; text-transform: uppercase; white-space: nowrap;
+    flex: 0 0 auto;
+  }
+  .stat {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 10px;
+    padding: 4.5px 0; border-bottom: 1px solid var(--line-soft);
+  }
+  .stat:last-child { border-bottom: 0; }
+  .stat .sl { font-size: 11.5px; color: var(--dim); }
+  .stat .v  { font-family: var(--mono); font-size: 11.5px; color: var(--text); text-align: right; }
+  .stat .v.good { color: var(--good); }
+  .stat .v.bad  { color: var(--bad); }
+  .stat .v.warn { color: var(--warn); }
+  .stat .v small { color: var(--faint); font-size: 10px; }
+
+  .merge {
+    margin-top: 10px; padding: 9px 10px; border-radius: 10px;
+    background: rgba(77,163,255,.07); border: 1px solid rgba(77,163,255,.22);
+  }
+  .merge .mh {
+    font-family: var(--mono); font-size: 9.5px; font-weight: 600; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--brand); margin-bottom: 6px;
+  }
+  .merge .mr {
+    display: flex; justify-content: space-between; gap: 10px;
+    font-family: var(--mono); font-size: 10px; color: var(--faint); padding: 1.5px 0;
+  }
+  .merge .mr b { color: var(--dim); font-weight: 500; text-align: right; }
+
+  .closex {
+    position: absolute; top: 10px; right: 11px; cursor: pointer;
+    color: var(--faint); font-size: 15px; line-height: 1; padding: 3px;
+  }
+  .closex:hover { color: var(--text); }
+
+  #boot {
+    position: absolute; inset: 0; z-index: 50; display: flex;
+    align-items: center; justify-content: center; background: var(--page);
+    font-family: var(--mono); font-size: 12px; color: var(--dim); flex-direction: column; gap: 10px;
+  }
+  #boot.gone { display: none; }
+  #boot .err { color: var(--bad); max-width: 620px; text-align: center; line-height: 1.7; }
+</style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="boot"><div>Loading MapLibre GL 5.6.1 · h3-js 4.5.0 · OpenFreeMap tiles…</div><div id="booterr" class="err"></div></div>
+
+<!-- ---------- left panel ---------- -->
+<div id="left" class="panel">
+  <div class="phead">
+    <div class="eyebrow">SignalScope · prototype</div>
+    <h1>Coverage</h1>
+    <div class="sub" id="headsub">Adaptive H3 · storage res 10 · demo city</div>
+  </div>
+  <div class="pbody">
+
+    <div class="sect">
+      <div class="slab">Layer</div>
+      <div class="chips" id="layerchips">
+        <div class="chip on" data-layer="quality">Data quality</div>
+        <div class="chip" data-layer="rsrp">RSRP</div>
+        <div class="chip" data-layer="band">Band</div>
+        <div class="chip" data-layer="anchor">Anchor stability</div>
+      </div>
+    </div>
+
+    <div class="sect" id="banner-wrap"></div>
+
+    <div class="sect">
+      <div class="slab">Legend</div>
+      <div class="legend" id="legend"></div>
+    </div>
+
+    <div class="sect">
+      <div class="slab">Bin resolution · derived, not fixed</div>
+      <div class="resbar" id="resbar"></div>
+      <div id="resrows"></div>
+      <div style="height:8px"></div>
+      <div class="toggles">
+        <label class="tg"><input type="checkbox" id="tg-res"> Colour bins by resolution</label>
+        <label class="tg"><input type="checkbox" id="tg-inc" checked> Incident pins <span style="color:var(--faint)">(never aggregated)</span></label>
+        <label class="tg"><input type="checkbox" id="tg-basemap" checked> Basemap</label>
+      </div>
+    </div>
+
+    <div class="sect">
+      <div class="slab">Jump</div>
+      <div class="jump">
+        <div class="jb" data-view="orchard">Retail r10</div>
+        <div class="jb" data-view="cbd">CBD / waterfront</div>
+        <div class="jb" data-view="island">Whole area</div>
+        <div class="jb" data-view="changi">Airport roam</div>
+        <div class="jb" data-view="jurong">West sparse</div>
+        <div class="jb" data-view="cte">Expressway corridor</div>
+      </div>
+    </div>
+
+    <div class="sect">
+      <div class="dev">
+        <div class="hd">Reference device</div>
+        <b>Reference device</b> · Android 16 (SDK 36) · dual-SIM DSDS<br>
+        SIM1 <b>Carrier A</b> · LTE <b>B40</b> · 2300 TDD<br>
+        SIM2 <b>Carrier R</b> (foreign) roaming <b>Carrier B</b> · LTE <b>B3</b> · LTE_CA<br>
+        Default route: <b>Wi-Fi</b> · IMS PDN over LTE · <b>VoWiFi</b> via ePDG<br>
+        <span style="color:#4a5263">cqi / cqiTableIndex UNAVAILABLE · ta=5 on SIM1 only</span><br>
+        Bar thresholds <b>[-128,-118,-108,-98]</b> · <b>params=1</b> → RSRP alone
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ---------- right column: thesis readout + bin detail sheet ---------- -->
+<div id="rightcol">
+  <div id="right" class="panel">
+    <div class="slab" style="margin-bottom:7px">The contrast</div>
+    <div id="contrast" class="note bad" style="border-left-color:var(--bad)">…</div>
+  </div>
+
+  <div id="sheet" class="panel">
+    <div class="closex" id="sheetclose">&times;</div>
+    <div id="sheetbody"></div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.6.1/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/h3-js@4.5.0/dist/h3-js.umd.js"></script>
+<script>
+/* =====================================================================
+   0. Constants from the docs
+   ===================================================================== */
+
+const RULE_VERSION = 'adaptive/v1';
+const K_ANON       = 5;      // distinct contributors, coverage-map.md §3
+const N_MIN        = 30;     // observations, coverage-map.md §3
+const RES_STORAGE  = 10;     // adaptive-aggregation.md: storage never moves
+const RES_FLOOR    = 6;      // "Stop at res 6"
+// Not in the docs — see the comment in buildAdaptive(). A parent is only
+// claimed when this fraction of its res-10 children were actually surveyed.
+const MIN_PARENT_COVERAGE = 0.35;
+
+// Average H3 edge length, metres.
+const EDGE_M = { 6: 3229, 7: 1220, 8: 461, 9: 174, 10: 65.9 };
+
+// Seven outcome classes, coverage-map.md §1 "Rendering: outcome classes".
+// Evaluated in order, first match wins. Ordering class 1 before class 5 is the
+// whole thesis restated as a switch statement.
+const CLASSES = {
+  0: { name: 'Unsurveyed',          short: 'UNSURVEYED', colour: '#1b212b' },
+  1: { name: 'Route loss',          short: 'ROUTE LOSS', colour: '#b03a42' },
+  2: { name: 'NSA anchor unstable', short: 'NSA THRASH', colour: '#b8862f' },
+  3: { name: 'Reselection churn',   short: 'RESELECT',   colour: '#cfa338' },
+  4: { name: 'Validated but slow',  short: 'SLOW',       colour: '#a8642c' },
+  5: { name: '5G NSA stable',       short: '5G NSA',     colour: '#6b4bb8' },
+  6: { name: 'LTE solid',           short: 'LTE SOLID',  colour: '#2f9e6b' },
+};
+
+// Severity ranking, used only by the anti-erasure guard ("no child contradicts").
+const SEVERITY = { 0: 0, 6: 1, 5: 1, 3: 2, 2: 3, 4: 3, 1: 4 };
+
+// Nine causes, README.md. Note which ones this device can actually produce:
+// no NR leg means cause 2 is not reachable here.
+const CAUSES = {
+  1: 'Radio coverage loss',
+  2: '5G NSA anchor thrash',
+  3: 'Cell reselection ping-pong',
+  4: 'PS attach / PDN failure',
+  5: 'Data SUSPENDED',
+  6: 'Connected-but-broken path',
+  7: 'Wi-Fi ↔ cellular thrash',
+  8: 'Device-side',
+  9: 'Carrier-side',
+};
+
+// Real thresholds read off this handset via `dumpsys carrier_config`.
+// KEY_PARAMETERS_USED_FOR_LTE_SIGNAL_BAR_INT = 1 → the bar is RSRP alone.
+const LTE_BAR_THRESHOLDS = [-128, -118, -108, -98];
+function carrierBars(rsrp) {
+  let b = 0;
+  for (const t of LTE_BAR_THRESHOLDS) if (rsrp >= t) b++;
+  return b;
+}
+
+/* =====================================================================
+   1. Deterministic PRNG — the demo must be the same every reload
+   ===================================================================== */
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = a + 0x6D2B79F5 | 0;
+    let t = Math.imul(a ^ a >>> 15, 1 | a);
+    t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t;
+    return ((t ^ t >>> 14) >>> 0) / 4294967296;
+  };
+}
+const rnd = mulberry32(20260912);
+const R  = () => rnd();
+const rr = (lo, hi) => lo + rnd() * (hi - lo);
+const ri = (lo, hi) => Math.round(rr(lo, hi));
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+/* =====================================================================
+   2. Statistics — Wilson score interval
+   adaptive-aggregation.md: "Wilson intervals, not normal approximation"
+   ===================================================================== */
+
+function wilson(p, n, z = 1.96) {
+  if (n <= 0) return [0, 1];
+  const z2 = z * z;
+  const d  = 1 + z2 / n;
+  const c  = p + z2 / (2 * n);
+  const m  = z * Math.sqrt((p * (1 - p) + z2 / (4 * n)) / n);
+  return [clamp((c - m) / d, 0, 1), clamp((c + m) / d, 0, 1)];
+}
+const overlap = (a, b) => a[0] <= b[1] && b[0] <= a[1];
+
+/* =====================================================================
+   3. Classification — coverage-map.md, first match wins
+   ===================================================================== */
+
+function classify(s) {
+  if (s.n_contributors < K_ANON || s.n_obs < N_MIN)            return 0;
+  if (s.validated_frac < 0.80)                                 return 1;
+  if (s.rat === 'NR_NSA' && s.anchor_stability < 0.60)         return 2;
+  if (s.reselect_rate > 2 && s.speed_kph < 5)                  return 3;
+  if (s.probe_p90_ms > 1500 || s.probe_success < 0.95)         return 4;
+  if (s.rat === 'NR_NSA')                                      return 5;
+  return 6;
+}
+
+/* =====================================================================
+   4. Synthetic-but-plausible survey, shaped by the real device readout
+   =====================================================================
+   Dual LTE. No NR anywhere: SIM1 is Carrier A on B40, SIM2 is a foreign SIM
+   roaming onto Carrier B on B3 with overrideNetwork=LTE_CA. So the causes that
+   drive this map are 7 (Wi-Fi thrash), 6 (connected-but-broken), 5 (suspend
+   during VoWiFi↔VoLTE), 4 (roaming PDN reject) and 3 (reselection), not 2.
+   ===================================================================== */
+
+// SIM1: Carrier A, home network, band 40 TDD 2300.
+const SIM1 = { mcc: 525, mnc: 10, op: 'Carrier A', band: 40, rat: 'LTE',    roaming: false };
+// SIM2: Carrier R (srael) roaming on Carrier B, band 3, reported as LTE_CA.
+const SIM2 = { mcc: 525, mnc:  5, op: 'Carrier B (Partner roam)', band: 3, rat: 'LTE_CA', roaming: true };
+
+/*
+  A zone is a behavioural region, not a bin. Each produces res-10 leaves whose
+  metrics are drawn from the profile; the merge walk afterwards decides what
+  resolution they are actually published at. `spread` controls how much the
+  profile varies leaf-to-leaf, which is what makes Wilson intervals separate
+  and therefore what keeps a region fine-grained.
+*/
+const ZONES = [
+  {
+    id: 'retail', label: 'Retail district', lat: 0.7048, lng: 101.4318, k: 9,
+    pool: 26, grad: 0.010, ph: 0.4, sim: SIM1, obs: [140, 460], con: [7, 15], val: [0.95, 0.995], succ: [0.97, 0.999],
+    p90: [190, 520], rsrp: [-92, -74], sinr: [8, 19], resel: [0.3, 1.2], speed: [1, 4],
+    wifi: [0.04, 0.14], spread: 0.02, cause: 7,
+    pockets: [ // mall entrances: the phone clings to a mall AP with no upstream
+      { lat: 0.7041, lng: 101.4320, k: 1, val: [0.54, 0.69], succ: [0.55, 0.72], p90: [2100, 5200],
+        rsrp: [-86, -71], wifi: [0.58, 0.86], cause: 7, label: 'Mall concourse' },
+      { lat: 0.7009, lng: 101.4388, k: 1, val: [0.60, 0.74], succ: [0.62, 0.78], p90: [1800, 4400],
+        rsrp: [-90, -76], wifi: [0.52, 0.78], cause: 7, label: 'Mall link bridge' },
+      { lat: 0.7067, lng: 101.4270, k: 0, val: [0.66, 0.77], succ: [0.70, 0.84], p90: [1500, 3300],
+        rsrp: [-95, -82], wifi: [0.44, 0.66], cause: 7, label: 'Mall forecourt' },
+    ],
+  },
+  {
+    id: 'marina', label: 'Financial district', lat: 0.6838, lng: 101.4515, k: 8,
+    pool: 28, grad: 0.012, ph: 1.1, sim: SIM1, obs: [160, 520], con: [8, 17], val: [0.93, 0.99], succ: [0.90, 0.97],
+    p90: [900, 2400], rsrp: [-96, -78], sinr: [3, 12], resel: [0.4, 1.6], speed: [1, 4],
+    wifi: [0.06, 0.2], spread: 0.025, cause: 9,
+    pockets: [
+      { lat: 0.6810, lng: 101.4540, k: 1, val: [0.58, 0.73], succ: [0.60, 0.76], p90: [2400, 6100],
+        rsrp: [-88, -73], wifi: [0.1, 0.2], cause: 6, label: 'Hotel basement link' },
+      { lat: 0.6866, lng: 101.4520, k: 0, val: [0.62, 0.75], succ: [0.64, 0.79], p90: [2000, 4800],
+        rsrp: [-84, -70], wifi: [0.08, 0.18], cause: 6, label: 'Station underpass' },
+    ],
+  },
+  {
+    id: 'outram', label: 'Old quarter', lat: 0.6836, lng: 101.4400, k: 7,
+    pool: 20, grad: 0.016, ph: 2.2, sim: SIM1, obs: [90, 300], con: [6, 12], val: [0.90, 0.985], succ: [0.94, 0.995],
+    p90: [280, 900], rsrp: [-101, -83], sinr: [2, 11], resel: [1.6, 4.2], speed: [1, 4],
+    wifi: [0.03, 0.1], spread: 0.03, cause: 3,
+    pockets: [
+      { lat: 0.6812, lng: 101.4430, k: 1, val: [0.82, 0.93], succ: [0.88, 0.96], p90: [700, 1900],
+        rsrp: [-104, -90], resel: [3.4, 6.2], cause: 3, label: 'Hilltop small-cell cluster' },
+    ],
+  },
+  {
+    id: 'sentosa', label: 'Harbour / island resort', lat: 0.6650, lng: 101.4210, k: 7,
+    pool: 14, grad: 0.020, ph: 3.0, sim: SIM1, obs: [70, 240], con: [5, 10], val: [0.88, 0.97], succ: [0.92, 0.99],
+    p90: [320, 1100], rsrp: [-104, -86], sinr: [1, 10], resel: [0.6, 2.0], speed: [1, 5],
+    wifi: [0.2, 0.42], spread: 0.03, cause: 5,
+    pockets: [
+      // VoWiFi over the resort AP hands back to VoLTE and data goes SUSPENDED
+      { lat: 0.6596, lng: 101.4200, k: 1, val: [0.55, 0.70], succ: [0.58, 0.75], p90: [2200, 5600],
+        rsrp: [-100, -84], wifi: [0.6, 0.88], suspend: [0.18, 0.36], cause: 5,
+        label: 'Cable-car station / ePDG handback' },
+    ],
+  },
+  {
+    id: 'expressway', label: 'Expressway corridor', line: [[0.7010, 101.4462], [0.7180, 101.4452],
+      [0.7390, 101.4470], [0.7620, 101.4496], [0.7810, 101.4520]], k: 1,
+    pool: 17, grad: 0.026, ph: 0.9, sim: SIM1, obs: [60, 210], con: [5, 11], val: [0.86, 0.97], succ: [0.90, 0.99],
+    p90: [300, 1200], rsrp: [-106, -88], sinr: [0, 9], resel: [2.6, 7.4], speed: [46, 84],
+    wifi: [0, 0.02], spread: 0.035, cause: 3,
+    pockets: [
+      { lat: 0.7262, lng: 101.4459, k: 1, val: [0.48, 0.66], succ: [0.52, 0.70], p90: [2600, 7000],
+        rsrp: [-118, -104], sinr: [-6, 2], cause: 1, label: 'Expressway tunnel portal' },
+    ],
+  },
+  {
+    id: 'kallang', label: 'Inner east', lat: 0.7080, lng: 101.4720, k: 10,
+    pool: 13, grad: 0.052, ph: 1.7, sim: SIM1, obs: [70, 200], con: [5, 9], val: [0.965, 0.995], succ: [0.974, 0.999],
+    p90: [220, 620], rsrp: [-99, -84], sinr: [6, 16], resel: [0.3, 1.3], speed: [1, 22],
+    wifi: [0.02, 0.08], spread: 0.004, cause: 0,
+  },
+  {
+    id: 'bedok', label: 'East coastal', lat: 0.7236, lng: 101.5273, k: 12,
+    pool: 11, grad: 0.030, ph: 2.6, sim: SIM1, obs: [48, 150], con: [5, 8], val: [0.955, 0.995], succ: [0.972, 0.999],
+    p90: [240, 700], rsrp: [-103, -86], sinr: [5, 15], resel: [0.3, 1.4], speed: [1, 26],
+    wifi: [0.02, 0.1], spread: 0.005, cause: 0,
+  },
+  {
+    id: 'punggol', label: 'Northeast new towns', lat: 0.8020, lng: 101.5070, k: 9,
+    pool: 7,  grad: 0.014, ph: 0.3, sim: SIM1, obs: [34, 96], con: [3, 6], val: [0.95, 0.995], succ: [0.970, 0.998],
+    p90: [260, 820], rsrp: [-107, -90], sinr: [3, 13], resel: [0.4, 1.6], speed: [1, 30],
+    wifi: [0.02, 0.09], spread: 0.006, cause: 0,
+  },
+  {
+    id: 'airport', label: 'Airport / east corridor', lat: 0.7560, lng: 101.5860, k: 8,
+    pool: 12, grad: 0.022, ph: 1.4, sim: SIM2, obs: [60, 190], con: [5, 10], val: [0.70, 0.86], succ: [0.76, 0.93],
+    p90: [900, 3100], rsrp: [-99, -80], sinr: [2, 12], resel: [1.0, 3.0], speed: [1, 12],
+    wifi: [0.1, 0.3], spread: 0.03, cause: 4,
+    pockets: [
+      { lat: 0.7592, lng: 101.5894, k: 1, val: [0.42, 0.60], succ: [0.48, 0.66], p90: [3000, 8200],
+        rsrp: [-92, -76], cause: 4, label: 'Terminal arrival hall — PDN reject 33' },
+      { lat: 0.7508, lng: 101.5790, k: 0, val: [0.55, 0.70], succ: [0.60, 0.78], p90: [2100, 5400],
+        rsrp: [-95, -80], cause: 4, label: 'Airport rail station' },
+    ],
+  },
+  {
+    id: 'west', label: 'Western industrial', lat: 0.7330, lng: 101.3420, k: 11,
+    pool: 8,  grad: 0.020, ph: 2.0, sim: SIM1, obs: [8, 40], con: [1, 4], val: [0.90, 0.99], succ: [0.92, 0.995],
+    p90: [300, 1100], rsrp: [-108, -88], sinr: [2, 13], resel: [0.4, 2.0], speed: [1, 34],
+    wifi: [0.02, 0.12], spread: 0.02, cause: 0,
+  },
+  {
+    id: 'woodlands', label: 'Northern border town', lat: 0.8360, lng: 101.3860, k: 10,
+    pool: 4,  grad: 0.020, ph: 0.8, sim: SIM1, obs: [4, 26], con: [1, 3], val: [0.88, 0.99], succ: [0.90, 0.995],
+    p90: [320, 1400], rsrp: [-112, -92], sinr: [0, 11], resel: [0.5, 2.2], speed: [1, 40],
+    wifi: [0.01, 0.1], spread: 0.02, cause: 0,
+  },
+  {
+    id: 'tuas', label: 'Far west', lat: 0.7300, lng: 101.2480, k: 9,
+    pool: 3,  grad: 0.020, ph: 1.9, sim: SIM1, obs: [3, 18], con: [1, 2], val: [0.84, 0.98], succ: [0.86, 0.99],
+    p90: [400, 1900], rsrp: [-116, -96], sinr: [-3, 9], resel: [0.6, 2.6], speed: [1, 44],
+    wifi: [0, 0.06], spread: 0.02, cause: 0,
+  },
+];
+
+function pickRange(range, fallback) {
+  const r = range || fallback;
+  return rr(r[0], r[1]);
+}
+
+/*
+  Contributors are a SET, not a count. This matters: merging seven bins that were
+  all walked by the same two people must still yield two contributors, or the
+  k-anonymity gate would be cleared by aggregation alone — which is exactly the
+  attack k ≥ 5 exists to stop. Each zone has a contributor pool; a leaf draws
+  from it; a merge unions the sets. Stands in for the distinct-token count in
+  coverage-map.md §3.
+*/
+function drawContribs(zoneId, pool, n) {
+  const s = new Set();
+  let guard = 0;
+  while (s.size < Math.min(n, pool) && guard++ < 200) {
+    s.add(zoneId + ':' + Math.floor(rnd() * pool));
+  }
+  return s;
+}
+
+// Build the res-10 leaf store. This is `bin_rollup` as data-model.md would hold it.
+function buildLeaves() {
+  const leaves = new Map();
+
+  function emit(cell, z, p) {
+    if (leaves.has(cell)) return;               // first writer wins; zones do not overlap much
+    const sim = z.sim;
+    const spread = z.spread ?? 0.02;
+    const [clat, clng] = h3.cellToLatLng(cell);
+
+    // Per-leaf noise: breaks nothing on its own, because it averages out under
+    // aggregation. It is here so single bins are not suspiciously identical.
+    const jitter = (rnd() - 0.5) * 2 * spread;
+
+    // Spatially coherent gradient, wavelength ~1 km. THIS is what stops a
+    // homogeneous suburb collapsing all the way to the res-6 floor: siblings
+    // 174 m apart differ enough that their Wilson intervals separate once each
+    // carries a few hundred observations, so the merge halts at res 9 or 8.
+    const g = z.grad || 0;
+    const grad = g * Math.sin(clat / 0.0090 * 2 * Math.PI + (z.ph || 0))
+                   * Math.cos(clng / 0.0110 * 2 * Math.PI + (z.ph || 0));
+
+    const val  = clamp(pickRange(p && p.val,  z.val)  + jitter + grad, 0, 1);
+    const succ = clamp(pickRange(p && p.succ, z.succ) + jitter * 0.5 + grad * 0.4, 0, 1);
+
+    const contribs = drawContribs(z.id, z.pool || 20,
+      Math.round(pickRange(p && p.con, z.con)));
+
+    const s = {
+      h3: cell,
+      zone: z.id,
+      label: (p && p.label) || z.label,
+      n_obs: Math.round(pickRange(p && p.obs, z.obs)),
+      contribs,
+      n_contributors: contribs.size,
+      validated_frac: val,
+      probe_success: succ,
+      probe_p50_ms: Math.round(pickRange(p && p.p50, [70, 190])),
+      probe_p90_ms: Math.round(pickRange(p && p.p90, z.p90)),
+      rsrp_p50: Math.round(pickRange(p && p.rsrp, z.rsrp)),
+      sinr_p50: Math.round(pickRange(p && p.sinr, z.sinr)),
+      reselect_rate: +pickRange(p && p.resel, z.resel).toFixed(2),
+      speed_kph: Math.round(pickRange(p && p.speed, z.speed)),
+      suspend_frac: +pickRange(p && p.suspend, [0, 0.03]).toFixed(3),
+      // Transport-anchor stability: 1 − (default-route transport flaps / ceiling).
+      // NOT the NR anchor_stability in coverage-map.md — see the note in the UI.
+      wifi_flap: +pickRange(p && p.wifi, z.wifi).toFixed(3),
+      rat: sim.rat,
+      band: sim.band,
+      mcc: sim.mcc, mnc: sim.mnc, op: sim.op, roaming: sim.roaming,
+      // NR anchor stability is undefined on this handset: there is no NR leg to lose.
+      anchor_stability: null,
+      top_cause: (p && p.cause) || z.cause || 0,
+      cause_share: +rr(0.42, 0.83).toFixed(2),
+      children: 1,
+      res: RES_STORAGE,
+    };
+    s.transport_anchor = +clamp(1 - s.wifi_flap, 0, 1).toFixed(3);
+    // If a bin has no dominant cause and it classifies clean, leave top_cause 0.
+    s.cls = classify(s);
+    if (s.cls === 6 || s.cls === 0) { if (!(p && p.cause)) s.top_cause = 0; }
+    leaves.set(cell, s);
+  }
+
+  for (const z of ZONES) {
+    let base = [];
+    if (z.line) {
+      // Walk the polyline, dropping a res-10 cell every ~40 m, then buffer by k.
+      const set = new Set();
+      for (let i = 0; i < z.line.length - 1; i++) {
+        const [aLat, aLng] = z.line[i], [bLat, bLng] = z.line[i + 1];
+        const steps = 130;
+        for (let t = 0; t <= steps; t++) {
+          const f = t / steps;
+          const c = h3.latLngToCell(aLat + (bLat - aLat) * f, aLng + (bLng - aLng) * f, RES_STORAGE);
+          for (const d of h3.gridDisk(c, z.k)) set.add(d);
+        }
+      }
+      base = [...set];
+    } else {
+      base = h3.gridDisk(h3.latLngToCell(z.lat, z.lng, RES_STORAGE), z.k);
+    }
+    for (const c of base) emit(c, z, null);
+
+    // Pockets overwrite: they are the genuinely different behaviour that must
+    // survive aggregation. Written after, so they replace the zone default.
+    for (const p of (z.pockets || [])) {
+      const pc = h3.latLngToCell(p.lat, p.lng, RES_STORAGE);
+      for (const c of h3.gridDisk(pc, p.k)) { leaves.delete(c); emit(c, z, p); }
+    }
+  }
+  return leaves;
+}
+
+/* =====================================================================
+   5. The merge walk — adaptive-aggregation.md, verbatim
+   =====================================================================
+   Walk res 10 → res 6. Merge a parent's children into the parent when ALL of:
+     · same dominant outcome class
+     · Wilson score intervals on validated_frac overlap pairwise
+     · no child with n ≥ k sits in a worse class than the parent's
+   Merge upward UNCONDITIONALLY while any child has n < k.
+   Never merge to hit a bin budget — there is no bin budget in this function.
+   ===================================================================== */
+
+function combine(children) {
+  const N = children.reduce((a, c) => a + c.n_obs, 0) || 1;
+  const w = (f) => children.reduce((a, c) => a + f(c) * c.n_obs, 0) / N;
+
+  // Distinct contributors is a UNION, never a sum. Merging seven bins walked by
+  // the same three people yields three contributors, so the k-gate cannot be
+  // cleared by aggregation alone.
+  const contribs = new Set();
+  for (const c of children) for (const t of c.contribs) contribs.add(t);
+
+  const causeW = {};
+  for (const c of children) if (c.top_cause) causeW[c.top_cause] = (causeW[c.top_cause] || 0) + c.n_obs;
+  const topCause = Object.keys(causeW).sort((a, b) => causeW[b] - causeW[a])[0];
+
+  const dominant = children.reduce((a, c) => (c.n_obs > a.n_obs ? c : a), children[0]);
+
+  const s = {
+    h3: null, zone: children[0].zone,
+    label: dominant.label,
+    n_obs: N,
+    contribs,
+    n_contributors: contribs.size,
+    validated_frac: w(c => c.validated_frac),
+    probe_success:  w(c => c.probe_success),
+    probe_p50_ms: Math.round(w(c => c.probe_p50_ms)),
+    probe_p90_ms: Math.round(w(c => c.probe_p90_ms)),
+    rsrp_p50: Math.round(w(c => c.rsrp_p50)),
+    sinr_p50: Math.round(w(c => c.sinr_p50)),
+    reselect_rate: +w(c => c.reselect_rate).toFixed(2),
+    speed_kph: Math.round(w(c => c.speed_kph)),
+    suspend_frac: +w(c => c.suspend_frac).toFixed(3),
+    wifi_flap: +w(c => c.wifi_flap).toFixed(3),
+    rat: children[0].rat, band: children[0].band,
+    mcc: children[0].mcc, mnc: children[0].mnc,
+    op: children[0].op, roaming: children[0].roaming,
+    anchor_stability: null,
+    top_cause: topCause ? +topCause : 0,
+    cause_share: +(causeW[topCause] ? causeW[topCause] / N : 0).toFixed(2),
+    children: children.reduce((a, c) => a + c.children, 0),
+  };
+  s.transport_anchor = +clamp(1 - s.wifi_flap, 0, 1).toFixed(3);
+  s.cls = classify(s);
+  return s;
+}
+
+function buildAdaptive(leaves) {
+  let current = [...leaves.values()];
+  const published = [];
+  const stats = { merged: 0, blocked: {} };
+
+  for (let res = RES_STORAGE; res > RES_FLOOR; res--) {
+    const groups = new Map();
+    for (const c of current) {
+      const parent = h3.cellToParent(c.h3, res - 1);
+      if (!groups.has(parent)) groups.set(parent, []);
+      groups.get(parent).push(c);
+    }
+
+    const next = [];
+    for (const [parent, kids] of groups) {
+
+      /*
+        Condition 0 — areal coverage. NOT IN adaptive-aggregation.md, and it has
+        to be: without it a handful of fringe res-10 cells merge all the way to
+        the res-6 floor and paint a ~28 km² hexagon the survey never entered.
+        That is "interpolate across a gap" wearing a merge rule as a disguise.
+        A parent may only be claimed when enough of it was actually observed.
+      */
+      const possible = Math.pow(7, RES_STORAGE - (res - 1));
+      const present  = kids.reduce((a, c) => a + c.children, 0);
+      const covered  = present / possible;
+
+      // Condition A — sample adequacy. Unconditional upward merge.
+      const anyThin = kids.some(c => c.n_contributors < K_ANON || c.n_obs < N_MIN);
+
+      let merge = false, reason = '';
+      if (covered < MIN_PARENT_COVERAGE) {
+        merge = false;
+        reason = 'only ' + Math.round(covered * 100) + '% of the parent cell was surveyed';
+      } else if (anyThin) {
+        merge = true;
+        reason = 'below k — merged unconditionally';
+      } else {
+        // Condition B — same dominant outcome class.
+        const cls0 = kids[0].cls;
+        const sameClass = kids.every(c => c.cls === cls0);
+
+        // Condition C — Wilson intervals on validated_frac overlap pairwise.
+        const ivs = kids.map(c => wilson(c.validated_frac, c.n_obs));
+        let wilsonOK = true;
+        for (let i = 0; i < ivs.length && wilsonOK; i++)
+          for (let j = i + 1; j < ivs.length; j++)
+            if (!overlap(ivs[i], ivs[j])) { wilsonOK = false; break; }
+
+        // Condition D — anti-erasure guard: a well-evidenced bad child blocks it.
+        const cand = combine(kids.map(c => ({ ...c })));
+        const contradicts = kids.some(c =>
+          c.n_contributors >= K_ANON && SEVERITY[c.cls] > SEVERITY[cand.cls]);
+
+        if (!sameClass)        reason = 'children disagree on outcome class';
+        else if (!wilsonOK)    reason = 'Wilson intervals do not overlap';
+        else if (contradicts)  reason = 'a well-evidenced worse child blocks the merge';
+        else { merge = true; reason = 'homogeneous — class agrees, Wilson overlaps'; }
+      }
+
+      if (merge && kids.length >= 1) {
+        const m = combine(kids);
+        m.h3 = parent;
+        m.res = res - 1;
+        m.merge_reason = reason;
+        m.merged_from = kids.length;
+        next.push(m);
+        stats.merged++;
+      } else {
+        for (const c of kids) {
+          c.res = h3.getResolution(c.h3);
+          c.merge_reason = 'held at this resolution — ' + reason;
+          published.push(c);
+        }
+        stats.blocked[reason] = (stats.blocked[reason] || 0) + 1;
+      }
+    }
+    current = next;
+    if (!current.length) break;
+  }
+  for (const c of current) { c.res = h3.getResolution(c.h3); published.push(c); }
+  return { published, stats };
+}
+
+/* =====================================================================
+   6. Incident pins — point events. NEVER aggregated.
+   adaptive-aggregation.md: "an incident pin is never aggregated"
+   ===================================================================== */
+
+const INCIDENTS = [
+  { lat: 0.7041, lng: 101.4321, t: '18:41', dur: '47 s', cause: 7,
+    title: 'Data stalled, call held',
+    detail: 'Default route on Wi-Fi (mall AP), NET_CAPABILITY_VALIDATED lost, cellular not taken. RSRP −81 dBm throughout — 4 of 4 bars.', sim: 1 },
+  { lat: 0.7010, lng: 101.4388, t: '12:18', dur: '1 m 12 s', cause: 7,
+    title: 'Route flapped Wi-Fi ↔ LTE 6×',
+    detail: 'Six default-route transitions in 72 s. Radio healthy on B40 the whole time.', sim: 1 },
+  { lat: 0.6596, lng: 101.4200, t: '20:07', dur: '—', cause: 5,
+    title: 'Call dropped — VoWiFi → VoLTE handback',
+    detail: 'ePDG tunnel torn down leaving the resort AP; getDataState() = DATA_SUSPENDED for 9 s during SRVCC.', sim: 1 },
+  { lat: 0.7592, lng: 101.5894, t: '09:52', dur: '3 m 04 s', cause: 4,
+    title: 'No data on arrival — PDN reject',
+    detail: 'SIM2 (Partner roaming Carrier B ): CS registered, PS rejected, getRejectCause() = 33. Full bars on B3.', sim: 2 },
+  { lat: 0.7508, lng: 101.5790, t: '09:58', dur: '52 s', cause: 4,
+    title: 'Roaming re-attach loop',
+    detail: 'Three PDN activations in 50 s on SIM2. isRoaming=true, overrideNetwork=LTE_CA.', sim: 2 },
+  { lat: 0.7262, lng: 101.4459, t: '08:26', dur: '31 s', cause: 1,
+    title: 'Out of service — tunnel',
+    detail: 'RSRP −121 dBm, SINR −5 dB, ServiceState OUT_OF_SERVICE. This one really is coverage.', sim: 1 },
+  { lat: 0.7390, lng: 101.4469, t: '08:31', dur: '18 s', cause: 3,
+    title: 'Reselection ping-pong at 74 km/h',
+    detail: 'Serving cell changed 7× in 18 s on B40. cqi UNAVAILABLE on this chipset, so congestion cannot be confirmed.', sim: 1 },
+  { lat: 0.6810, lng: 101.4540, t: '13:44', dur: '2 m 21 s', cause: 6,
+    title: 'Connected but broken',
+    detail: 'Network up, validated lost, DNS timing out. LinkProperties showed v6-only with no v4- CLAT interface.', sim: 1 },
+  { lat: 0.6866, lng: 101.4521, t: '19:02', dur: '1 m 05 s', cause: 6,
+    title: 'CGNAT rebind mid-call',
+    detail: 'IPv4 address changed under an established TCP session. Radio untouched, RSRP −77 dBm.', sim: 1 },
+  { lat: 0.6812, lng: 101.4431, t: '17:36', dur: '26 s', cause: 3,
+    title: 'Small-cell churn while stationary',
+    detail: '5 CI changes in 26 s at walking pace. ta=5 on SIM1 — ~390 m to serving cell.', sim: 1 },
+  { lat: 0.7066, lng: 101.4271, t: '11:09', dur: '38 s', cause: 7,
+    title: 'Clinging to a dead AP',
+    detail: 'Wi-Fi held the default route with no upstream for 38 s. Cellular was validated and idle beside it.', sim: 1 },
+  { lat: 0.7182, lng: 101.4452, t: '07:58', dur: '14 s', cause: 6,
+    title: 'Validated lost, radio healthy',
+    detail: 'RSRQ −12 dB, RSSNR swung 5 → −3 dB between samples. Same RSRP −94 dBm on both.', sim: 1 },
+  { lat: 0.6846, lng: 101.4504, t: '19:21', dur: '58 s', cause: 9,
+    title: 'Slow but validated — evening peak',
+    detail: 'p90 4.8 s, p50 260 ms. RSRP unchanged from midday. cqiTableIndex UNAVAILABLE, so load is inferred from RSRQ.', sim: 1 },
+  { lat: 0.7560, lng: 101.5812, t: '10:14', dur: '41 s', cause: 4,
+    title: 'Roaming data barred after re-attach',
+    detail: 'SIM2 attached, data bearer refused. SIM1 (Carrier A) was validated on B40 at the same moment.', sim: 2 },
+];
+
+/* =====================================================================
+   7. Paint — colour per layer, precomputed onto each feature
+   ===================================================================== */
+
+// coverage-map.md rendering rule 1: "Confidence is opacity, never colour."
+function confidenceOpacity(s) {
+  if (s.cls === 0) return 0.34;
+  const t = clamp((Math.log10(Math.max(s.n_obs, 1)) - 1.3) / 1.9, 0, 1); // ~20 → ~1600 obs
+  return +(0.30 + 0.50 * t).toFixed(3);
+}
+
+// The RSRP layer deliberately renders THIS CARRIER'S OWN BAR COMPUTATION —
+// thresholds [-128,-118,-108,-98] with params=1, i.e. RSRP alone. That is the
+// map the network would draw of itself.
+const BAR_COLOUR = ['#8e2f28', '#c0562b', '#d8b32e', '#69b53a', '#1f9e5a'];
+function rsrpColour(s) {
+  if (s.cls === 0) return '#1b212b';
+  return BAR_COLOUR[carrierBars(s.rsrp_p50)];
+}
+
+const BAND_COLOUR = { 40: '#4da3ff', 3: '#b388ff' };
+function bandColour(s) { return s.cls === 0 ? '#1b212b' : (BAND_COLOUR[s.band] || '#5c6677'); }
+
+function anchorColour(s) {
+  if (s.cls === 0) return '#1b212b';
+  const a = s.transport_anchor;
+  if (a >= 0.95) return '#2f9e6b';
+  if (a >= 0.88) return '#5aa85a';
+  if (a >= 0.75) return '#cfa338';
+  if (a >= 0.55) return '#a8642c';
+  return '#b03a42';
+}
+
+const RES_COLOUR = { 10: '#4da3ff', 9: '#3fc4bd', 8: '#ffb648', 7: '#ff8a5b', 6: '#b388ff' };
+
+/* =====================================================================
+   8. Build everything
+   ===================================================================== */
+
+let BINS = [], BY_ID = new Map(), RESCOUNT = {}, CLSCOUNT = {}, CONTRAST = {}, LEAF_COUNT = 0;
+
+function buildAll() {
+  const leaves = buildLeaves();
+  LEAF_COUNT = leaves.size;
+  const { published } = buildAdaptive(leaves);
+
+  BINS = published;
+  const features = [];
+  for (const s of BINS) {
+    BY_ID.set(s.h3, s);
+    RESCOUNT[s.res] = (RESCOUNT[s.res] || 0) + 1;
+    CLSCOUNT[s.cls] = (CLSCOUNT[s.cls] || 0) + 1;
+
+    const ring = h3.cellToBoundary(s.h3, true); // [lng, lat]
+    ring.push(ring[0]);
+    const op = confidenceOpacity(s);
+    features.push({
+      type: 'Feature',
+      id: undefined,
+      properties: {
+        h3: s.h3, res: s.res, cls: s.cls,
+        c_quality: CLASSES[s.cls].colour,
+        c_rsrp:    rsrpColour(s),
+        c_band:    bandColour(s),
+        c_anchor:  anchorColour(s),
+        c_res:     RES_COLOUR[s.res] || '#5c6677',
+        o_quality: op,
+        o_rsrp:    s.cls === 0 ? 0.34 : 0.72,
+        o_band:    s.cls === 0 ? 0.34 : 0.62,
+        o_anchor:  s.cls === 0 ? 0.34 : 0.72,
+        o_res:     0.62,
+        // "looks fine on power, red on usability" — used for the contrast outline
+        lie: s.cls === 1 && carrierBars(s.rsrp_p50) >= 4 ? 1 : 0,
+      },
+      geometry: { type: 'Polygon', coordinates: [ring] },
+    });
+  }
+
+  // Quantify the thesis.
+  const surveyed = BINS.filter(b => b.cls !== 0);
+  const bad      = surveyed.filter(b => b.cls === 1);
+  const badFull  = bad.filter(b => carrierBars(b.rsrp_p50) >= 4);
+  const badWeak  = bad.filter(b => b.rsrp_p50 < -108);   // genuine coverage loss
+  const rsrps    = bad.map(b => b.rsrp_p50).sort((a, b) => a - b);
+  CONTRAST = {
+    surveyed: surveyed.length,
+    grey: (CLSCOUNT[0] || 0),
+    bad: bad.length,
+    badFull: badFull.length,
+    badWeak: badWeak.length,
+    medRsrp: rsrps.length ? rsrps[Math.floor(rsrps.length / 2)] : 0,
+    lie: features.filter(f => f.properties.lie).length,
+  };
+
+  return { type: 'FeatureCollection', features };
+}
+
+function incidentGeoJSON() {
+  return {
+    type: 'FeatureCollection',
+    features: INCIDENTS.map((i, idx) => ({
+      type: 'Feature',
+      properties: { idx, cause: i.cause },
+      geometry: { type: 'Point', coordinates: [i.lng, i.lat] },
+    })),
+  };
+}
+
+/* =====================================================================
+   9. Map
+   ===================================================================== */
+
+const VIEWS = {
+  retail: { center: [101.4330, 0.7035], zoom: 15.1, label: 'Retail district · res-10 detail' },
+  cbd:     { center: [101.4460, 0.6905], zoom: 13.5, label: 'CBD / waterfront' },
+  area:  { center: [101.4350, 0.7450], zoom: 10.7, label: 'Whole area' },
+  airport:  { center: [101.5840, 0.7550], zoom: 14.0, label: 'Airport · SIM2 roaming' },
+  west:  { center: [101.3420, 0.7330], zoom: 12.6, label: 'Western industrial · sparse' },
+  expressway:     { center: [101.4470, 0.7300], zoom: 13.2, label: 'Expressway corridor' },
+  start:   { center: [101.4420, 0.7070], zoom: 12.5 },
+};
+
+let map, currentLayer = 'quality', showRes = false, selected = null;
+
+const STYLE_URL    = 'https://tiles.openfreemap.org/styles/dark';
+const STYLE_BACKUP = 'https://tiles.openfreemap.org/styles/positron';
+
+function boot() {
+  if (typeof maplibregl === 'undefined') { fail('MapLibre GL JS failed to load from jsDelivr.'); return; }
+  if (typeof h3 === 'undefined')         { fail('h3-js failed to load from jsDelivr.'); return; }
+
+  const t0 = performance.now();
+  const binsGeoJSON = buildAll();
+  window.__buildMs = +(performance.now() - t0).toFixed(1);
+  console.info('[signalscope] ' + BINS.length + ' bins from ' + LEAF_COUNT +
+    ' res-10 leaves in ' + window.__buildMs + ' ms (H3 + merge walk + GeoJSON)');
+
+  map = new maplibregl.Map({
+    container: 'map',
+    style: STYLE_URL,
+    center: VIEWS.start.center,
+    zoom: VIEWS.start.zoom,
+    attributionControl: false,
+    hash: false,
+  });
+
+  map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+  map.addControl(new maplibregl.AttributionControl({
+    compact: false,
+    customAttribution: '© OpenStreetMap contributors · bins: SignalScope (demo)',
+  }), 'bottom-right');
+  map.addControl(new maplibregl.ScaleControl({ maxWidth: 110, unit: 'metric' }), 'bottom-left');
+
+  // OpenFreeMap's own dark style references a `wood-pattern` fill image that its
+  // sprite sheet (ofm_f384) does not ship, so MapLibre warns once per tile.
+  // Upstream bug, cosmetic. Absorbed with a transparent 1x1; a handful of warnings
+  // still escape from tiles whose worker request was already in flight.
+  map.on('styleimagemissing', (e) => {
+    try { map.addImage(e.id, { width: 1, height: 1, data: new Uint8Array(4) }); }
+    catch (_) { /* already present */ }
+  });
+
+  map.on('error', (e) => {
+    const m = (e && e.error && e.error.message) || '';
+    if (m) console.warn('[maplibre]', m);
+  });
+
+  map.on('load', () => {
+    document.getElementById('boot').classList.add('gone');
+
+    // Put the overlay beneath the basemap's labels so streets stay readable.
+    const layers = map.getStyle().layers || [];
+    const firstSymbol = (layers.find(l => l.type === 'symbol') || {}).id;
+
+    map.addSource('bins', { type: 'geojson', data: binsGeoJSON, promoteId: 'h3' });
+    map.addSource('incidents', { type: 'geojson', data: incidentGeoJSON() });
+
+    map.addLayer({
+      id: 'bins-fill', type: 'fill', source: 'bins',
+      paint: {
+        'fill-color': ['get', 'c_quality'],
+        'fill-opacity': ['get', 'o_quality'],
+        'fill-antialias': true,
+      },
+    }, firstSymbol);
+
+    // Stroke width encodes resolution: the coarser the bin, the heavier the
+    // boundary. This is the confidence encoding made structural.
+    map.addLayer({
+      id: 'bins-line', type: 'line', source: 'bins',
+      paint: {
+        'line-color': '#05070a',
+        'line-width': ['match', ['get', 'res'], 10, 0.5, 9, 1.0, 8, 1.7, 7, 2.6, 3.4],
+        'line-opacity': 0.55,
+      },
+    }, firstSymbol);
+
+    // The contrast outline: only shown on the RSRP layer.
+    map.addLayer({
+      id: 'bins-lie', type: 'line', source: 'bins',
+      filter: ['==', ['get', 'lie'], 1],
+      layout: { visibility: 'none' },
+      paint: { 'line-color': '#ff6b6b', 'line-width': 2.1, 'line-opacity': 0.95 },
+    }, firstSymbol);
+
+    map.addLayer({
+      id: 'bins-sel', type: 'line', source: 'bins',
+      filter: ['==', ['get', 'h3'], ''],
+      paint: { 'line-color': '#e9edf4', 'line-width': 2.4, 'line-opacity': 1 },
+    }, firstSymbol);
+
+    map.addLayer({
+      id: 'inc-halo', type: 'circle', source: 'incidents',
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 7, 16, 20],
+        'circle-color': '#ff6b6b', 'circle-opacity': 0.16,
+      },
+    });
+    map.addLayer({
+      id: 'inc-dot', type: 'circle', source: 'incidents',
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 10, 3.4, 16, 7],
+        'circle-color': '#ff6b6b',
+        'circle-stroke-color': '#07090d', 'circle-stroke-width': 1.6,
+      },
+    });
+
+    wireInteraction();
+    renderLegend();
+    renderResBar();
+    renderContrast();
+    setLayer('quality');
+  });
+}
+
+function fail(msg) {
+  document.getElementById('booterr').innerHTML =
+    msg + '<br><br>If you are seeing this inside a published Artifact, that is expected: ' +
+    'artifact CSP blocks tile requests. Open this file locally instead.';
+}
+
+/* ---------- interaction ---------- */
+
+function wireInteraction() {
+  map.on('click', (e) => {
+    const inc = map.queryRenderedFeatures(e.point, { layers: ['inc-dot', 'inc-halo'] });
+    if (inc.length) { showIncident(INCIDENTS[inc[0].properties.idx]); return; }
+    const f = map.queryRenderedFeatures(e.point, { layers: ['bins-fill'] });
+    if (f.length) showBin(f[0].properties.h3); else closeSheet();
+  });
+  for (const id of ['bins-fill', 'inc-dot']) {
+    map.on('mouseenter', id, () => map.getCanvas().style.cursor = 'pointer');
+    map.on('mouseleave', id, () => map.getCanvas().style.cursor = '');
+  }
+  map.on('zoomend', updateHead);
+  map.on('moveend', updateHead);
+}
+
+function updateHead() {
+  const z = map.getZoom().toFixed(1);
+  document.getElementById('headsub').textContent =
+    'Adaptive H3 · storage res ' + RES_STORAGE + ' · ' + BINS.length +
+    ' published bins · z' + z;
+}
+
+/* ---------- layer switching ---------- */
+
+function setLayer(which) {
+  currentLayer = which;
+  document.querySelectorAll('#layerchips .chip')
+    .forEach(c => c.classList.toggle('on', c.dataset.layer === which));
+
+  const key = showRes ? 'res' : which;
+  map.setPaintProperty('bins-fill', 'fill-color', ['get', 'c_' + key]);
+  map.setPaintProperty('bins-fill', 'fill-opacity', ['get', 'o_' + key]);
+  map.setLayoutProperty('bins-lie', 'visibility',
+    (!showRes && which === 'rsrp') ? 'visible' : 'none');
+
+  renderLegend();
+  renderBanner();
+  if (selected) showBin(selected);
+}
+
+/* ---------- legend ---------- */
+
+const LEGENDS = {
+  quality: () => {
+    const rows = [6, 5, 2, 3, 4, 1, 0].map(c => {
+      const n = CLSCOUNT[c] || 0;
+      const noNR = (c === 2 || c === 5);
+      return { colour: CLASSES[c].colour, name: CLASSES[c].name,
+               count: n ? n + ' bins' : (noNR ? 'no NR on this device' : '0 bins'),
+               off: n === 0 };
+    });
+    return { rows, foot: 'Confidence is opacity, never colour. Unsurveyed is grey and stays grey — nothing is interpolated across a gap.' };
+  },
+  rsrp: () => ({
+    rows: [
+      { colour: BAR_COLOUR[4], name: '≥ −98 dBm', count: '4 bars' },
+      { colour: BAR_COLOUR[3], name: '−108 … −98',  count: '3 bars' },
+      { colour: BAR_COLOUR[2], name: '−118 … −108', count: '2 bars' },
+      { colour: BAR_COLOUR[1], name: '−128 … −118', count: '1 bar' },
+      { colour: BAR_COLOUR[0], name: '< −128 dBm', count: '0 bars' },
+      { colour: '#1b212b', name: 'Unsurveyed', count: (CLSCOUNT[0] || 0) + ' bins' },
+    ],
+    foot: 'This is literally the carrier’s own bar formula — thresholds read off this handset, computed from RSRP alone. Red outlines mark bins that are green here and unusable on the quality layer.',
+  }),
+  band: () => {
+    const b40 = BINS.filter(b => b.cls !== 0 && b.band === 40).length;
+    const b3  = BINS.filter(b => b.cls !== 0 && b.band === 3).length;
+    return {
+      rows: [
+        { colour: BAND_COLOUR[40], name: 'B40 · 2300 TDD · Carrier A ', count: b40 + ' bins' },
+        { colour: BAND_COLOUR[3],  name: 'B3 · 1800 · Carrier B  (roam)', count: b3 + ' bins' },
+        { colour: '#1b212b', name: 'Unsurveyed', count: (CLSCOUNT[0] || 0) + ' bins' },
+      ],
+      foot: 'Both SIMs are LTE. There is no NR band on this map because there is no NR leg on this handset.',
+    };
+  },
+  anchor: () => ({
+    rows: [
+      { colour: '#2f9e6b', name: '≥ 0.95 stable', count: '' },
+      { colour: '#5aa85a', name: '0.88 – 0.95', count: '' },
+      { colour: '#cfa338', name: '0.75 – 0.88', count: '' },
+      { colour: '#a8642c', name: '0.55 – 0.75', count: '' },
+      { colour: '#b03a42', name: '< 0.55 thrashing', count: '' },
+      { colour: '#1b212b', name: 'Unsurveyed', count: (CLSCOUNT[0] || 0) + ' bins' },
+    ],
+    foot: 'Transport anchor, not NR anchor — see the note above.',
+  }),
+  res: () => ({
+    rows: [10, 9, 8, 7, 6].filter(r => RESCOUNT[r]).map(r => ({
+      colour: RES_COLOUR[r], name: 'res ' + r + ' · ~' + EDGE_M[r] + ' m edge',
+      count: RESCOUNT[r] + ' bins',
+    })),
+    foot: 'Resolution is derived from homogeneity and evidence density. Big bin = we know less, and what we know is uniform.',
+  }),
+};
+
+function renderLegend() {
+  const spec = LEGENDS[showRes ? 'res' : currentLayer]();
+  const el = document.getElementById('legend');
+  el.innerHTML = spec.rows.map(r =>
+    '<span class="lg' + (r.off ? ' off' : '') + '"><i style="background:' + r.colour + '"></i>' +
+    r.name + '<span class="ct">' + (r.count || '') + '</span></span>').join('') +
+    '<div style="height:6px"></div><div class="note" style="border-left-color:var(--faint)">' +
+    spec.foot + '</div>';
+}
+
+/* ---------- per-layer banner ---------- */
+
+const BANNERS = {
+  quality: () => ({ cls: 'note', html:
+    '<b>Coloured by measured outcome.</b> Seven mutually exclusive classes, first match wins. ' +
+    'A bin that loses the route is red even at −77 dBm.' }),
+  rsrp: () => ({ cls: 'note bad', html:
+    '<b>This layer is the lie.</b> ' + CONTRAST.lie + ' bins read 3–4 bars here and are ' +
+    'unusable on the quality layer. Never ship this as the default.' }),
+  band: () => ({ cls: 'note', html:
+    '<b>B40 vs B3.</b> SIM1 Carrier A holds 2300 TDD; SIM2 roams onto Carrier B B3 with ' +
+    '<span class="m">overrideNetwork=LTE_CA</span>. The airport-zone failures are all on B3.' }),
+  anchor: () => ({ cls: 'note warn', html:
+    '<b><span class="m">anchor_stability</span> is undefined on this device.</b> ' +
+    'coverage-map.md defines it as 1 − (NR_NSA↔LTE transitions/min). This handset holds ' +
+    'no NR leg, so it would read 1.00 in every bin. Shown instead: <b>transport anchor</b> — ' +
+    'default-route flapping between Wi-Fi and cellular, which is the same failure one layer up.' }),
+};
+
+function renderBanner() {
+  const spec = showRes
+    ? { cls: 'note', html: '<b>Bin size is the confidence encoding.</b> Storage stays at res 10; ' +
+        'this is a derived view. No bin was merged to hit a rendering budget.' }
+    : BANNERS[currentLayer]();
+  document.getElementById('banner-wrap').innerHTML =
+    '<div class="' + spec.cls + '">' + spec.html + '</div>';
+}
+
+/* ---------- resolution histogram ---------- */
+
+function renderResBar() {
+  const total = BINS.length;
+  const order = [10, 9, 8, 7, 6].filter(r => RESCOUNT[r]);
+  document.getElementById('resbar').innerHTML = order.map(r =>
+    '<span style="width:' + (100 * RESCOUNT[r] / total) + '%;background:' + RES_COLOUR[r] + '"></span>').join('');
+  document.getElementById('resrows').innerHTML = order.map(r =>
+    '<div class="resrow"><span><span class="sw" style="background:' + RES_COLOUR[r] + '"></span>' +
+    'res ' + r + ' · ~' + EDGE_M[r] + ' m</span><b>' + RESCOUNT[r] + ' bins</b></div>').join('');
+}
+
+/* ---------- the contrast readout ---------- */
+
+function renderContrast() {
+  const c = CONTRAST;
+  document.getElementById('contrast').innerHTML =
+    '<b>' + c.bad + '</b> of ' + c.surveyed + ' surveyed bins lose the route ' +
+    '(<span class="m">validated_frac &lt; 0.80</span>).<br><br>' +
+    '<b>' + c.badFull + '</b> of those show <b>4 of 4 bars</b> on this carrier’s own ' +
+    'thresholds; median RSRP across all of them is <b>' + c.medRsrp + ' dBm</b>. ' +
+    'Only <b>' + c.badWeak + '</b> are actually weak.<br><br>' +
+    '<span style="color:var(--dim)">Switch to the RSRP layer and nearly all of them ' +
+    'turn green. That disagreement is the pitch.</span><br><br>' +
+    '<span style="color:var(--faint)">' + c.grey + ' further bins stay grey: below ' +
+    'k = 5 contributors even after merging to the res-6 floor.</span>';
+}
+
+/* ---------- detail sheet ---------- */
+
+function pct(v) { return (v * 100).toFixed(1) + '%'; }
+
+function showBin(h3id) {
+  const s = BY_ID.get(h3id);
+  if (!s) return;
+  selected = h3id;
+  map.setFilter('bins-sel', ['==', ['get', 'h3'], h3id]);
+
+  const cl = CLASSES[s.cls];
+  const ci = wilson(s.validated_frac, s.n_obs);
+  const bars = carrierBars(s.rsrp_p50);
+  const tagColour = {
+    0: ['#8e99ab', 'rgba(142,153,171,.14)'],
+    1: ['#ff9a9a', 'rgba(176,58,66,.28)'],
+    2: ['#ffd08a', 'rgba(184,134,47,.28)'],
+    3: ['#ffdf95', 'rgba(207,163,56,.26)'],
+    4: ['#ffc39a', 'rgba(168,100,44,.3)'],
+    5: ['#d3bcff', 'rgba(107,75,184,.3)'],
+    6: ['#8ce7c0', 'rgba(47,158,107,.26)'],
+  }[s.cls];
+
+  const row = (l, v, k) =>
+    '<div class="stat"><span class="sl">' + l + '</span><span class="v' +
+    (k ? ' ' + k : '') + '">' + v + '</span></div>';
+
+  let html =
+    '<div class="shead"><div>' +
+      '<div class="hid">' + s.h3 + '</div>' +
+      '<div class="sname">' + s.label + '</div>' +
+    '</div><span class="tag" style="color:' + tagColour[0] + ';background:' + tagColour[1] + '">' +
+      cl.short + '</span></div>' +
+    '<div style="height:9px"></div>';
+
+  if (s.cls === 0) {
+    html += '<div class="note" style="border-left-color:var(--faint)">' +
+      'Below the publication threshold: <span class="m">k ≥ ' + K_ANON + '</span> contributors and ' +
+      '<span class="m">n ≥ ' + N_MIN + '</span> observations. It stays grey for everyone, including ' +
+      'the people who contributed it. Nothing is interpolated in.</div><div style="height:9px"></div>';
+    html += row('Samples · contributors', s.n_obs + ' · ' + s.n_contributors);
+  } else {
+    html +=
+      row('Samples · contributors', s.n_obs + ' · <span class="good">' + s.n_contributors + '</span>') +
+      row('Validated fraction',
+        '<span class="' + (s.validated_frac < 0.8 ? 'bad' : 'good') + '">' + s.validated_frac.toFixed(3) +
+        '</span> <small>CI ' + ci[0].toFixed(2) + '–' + ci[1].toFixed(2) + '</small>') +
+      row('Probe success · p90', pct(s.probe_success) + ' · ' + s.probe_p90_ms + ' ms',
+        (s.probe_success < 0.95 || s.probe_p90_ms > 1500) ? 'warn' : '') +
+      row('Median RSRP', s.rsrp_p50 + ' dBm <small>→ ' + bars + ' of 4 bars</small>',
+        bars >= 3 && s.cls === 1 ? 'bad' : '') +
+      row('Median SINR', s.sinr_p50 + ' dB') +
+      row('Reselect rate', s.reselect_rate + '/min <small>@ ' + s.speed_kph + ' km/h</small>',
+        (s.reselect_rate > 2 && s.speed_kph < 5) ? 'warn' : '') +
+      row('Transport anchor', s.transport_anchor.toFixed(2) +
+        ' <small>Wi-Fi flap ' + s.wifi_flap.toFixed(2) + '</small>',
+        s.transport_anchor < 0.75 ? 'bad' : '') +
+      row('NR anchor stability', '<small>n/a — no NR leg</small>') +
+      row('Suspend fraction', s.suspend_frac.toFixed(3), s.suspend_frac > 0.1 ? 'warn' : '') +
+      row('Network', s.op + ' <small>' + s.mcc + '-' + String(s.mnc).padStart(2, '0') +
+        '</small>') +
+      row('RAT · band', s.rat + ' · B' + s.band + (s.roaming ? ' <small>roaming</small>' : '')) +
+      row('Dominant cause', s.top_cause
+        ? '#' + s.top_cause + ' ' + CAUSES[s.top_cause] + ' <small>' + pct(s.cause_share) + '</small>'
+        : '<small>none dominant</small>');
+  }
+
+  html +=
+    '<div class="merge"><div class="mh">Record of the merge</div>' +
+      '<div class="mr"><span>Published resolution</span><b>res ' + s.res +
+        ' · ~' + EDGE_M[s.res] + ' m edge</b></div>' +
+      '<div class="mr"><span>Res-10 children</span><b>' + s.children +
+        (s.children === 1 ? ' (leaf)' : ' merged') + '</b></div>' +
+      '<div class="mr"><span>Rule</span><b>' + RULE_VERSION + ' · k=' + K_ANON +
+        ' · n≥' + N_MIN + ' · Wilson 95%</b></div>' +
+      '<div class="mr"><span>Reason</span><b style="max-width:180px">' +
+        (s.merge_reason || '—') + '</b></div>' +
+    '</div>';
+
+  document.getElementById('sheetbody').innerHTML = html;
+  document.getElementById('sheet').classList.add('on');
+}
+
+function showIncident(i) {
+  selected = null;
+  map.setFilter('bins-sel', ['==', ['get', 'h3'], '']);
+  document.getElementById('sheetbody').innerHTML =
+    '<div class="shead"><div>' +
+      '<div class="hid">incident · ' + i.t + ' · SIM' + i.sim + '</div>' +
+      '<div class="sname">' + i.title + '</div>' +
+    '</div><span class="tag" style="color:#ff9a9a;background:rgba(176,58,66,.28)">INCIDENT</span></div>' +
+    '<div style="height:9px"></div>' +
+    '<div class="stat"><span class="sl">Duration</span><span class="v">' + i.dur + '</span></div>' +
+    '<div class="stat"><span class="sl">Cause</span><span class="v">#' + i.cause + ' ' +
+      CAUSES[i.cause] + '</span></div>' +
+    '<div style="height:9px"></div>' +
+    '<div class="note bad">' + i.detail + '</div>' +
+    '<div class="merge"><div class="mh">Not aggregated</div>' +
+      '<div class="mr"><span>Stored as</span><b>point event, lat/lng</b></div>' +
+      '<div class="mr"><span>Rule</span><b>incidents are never merged<br>into a bin average</b></div>' +
+    '</div>';
+  document.getElementById('sheet').classList.add('on');
+}
+
+function closeSheet() {
+  selected = null;
+  document.getElementById('sheet').classList.remove('on');
+  if (map.getLayer('bins-sel')) map.setFilter('bins-sel', ['==', ['get', 'h3'], '']);
+}
+
+/* ---------- controls ---------- */
+
+document.getElementById('layerchips').addEventListener('click', (e) => {
+  const c = e.target.closest('.chip');
+  if (c) setLayer(c.dataset.layer);
+});
+document.getElementById('sheetclose').addEventListener('click', closeSheet);
+
+document.querySelectorAll('.jb').forEach(b => b.addEventListener('click', () => {
+  const v = VIEWS[b.dataset.view];
+  map.flyTo({ center: v.center, zoom: v.zoom, speed: 1.5, curve: 1.4 });
+}));
+
+document.getElementById('tg-res').addEventListener('change', (e) => {
+  showRes = e.target.checked;
+  setLayer(currentLayer);
+});
+document.getElementById('tg-inc').addEventListener('change', (e) => {
+  const v = e.target.checked ? 'visible' : 'none';
+  ['inc-halo', 'inc-dot'].forEach(l => map.setLayoutProperty(l, 'visibility', v));
+});
+document.getElementById('tg-basemap').addEventListener('change', (e) => {
+  // Proves the point in docs/map-stack.md: degrade to a plain bin grid with no
+  // basemap rather than to a blank screen.
+  const v = e.target.checked ? 'visible' : 'none';
+  for (const l of map.getStyle().layers) {
+    if (l.id.startsWith('bins-') || l.id.startsWith('inc-')) continue;
+    map.setLayoutProperty(l.id, 'visibility', v);
+  }
+});
+
+window.addEventListener('load', boot);
+</script>
+</body>
+</html>

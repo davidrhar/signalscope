@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app makes three classes of network request, and no others. Basemap vector tiles from
+  tiles.openfreemap.org, issued by MapLibre. Reachability probes bound to the cellular network,
+  which connect and hand-shake and send nothing. And, from the uplink-asymmetry probe, an 8 KB
+  POST to speed.cloudflare.com.
+
+  That POST is the only upload this app performs, and it is worth being exact about what it
+  contains, because an earlier version of this comment said there was no upload path at all: the
+  body is 8,192 bytes from a fixed-seed PRNG, byte-for-byte identical on every cycle, pseudo-random
+  only so that a compressing proxy cannot shrink it and flatter the measurement. It carries no
+  collected data, no device identifier and nothing about the user. **No measurement this app
+  records has an upload path**, which remains true and is the claim that matters.
+
+  There is no analytics and no crash reporter.
+
+  targetSdk 36 already defaults cleartext to off; this states it rather than inheriting it, so a
+  future dependency cannot quietly re-enable plaintext HTTP for its own fetches. User-added CA
+  certificates are not trusted either — none of this traffic carries anything the user would want
+  to inspect, and nothing in this app needs to be interceptable by a proxy they did not install
+  for it.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

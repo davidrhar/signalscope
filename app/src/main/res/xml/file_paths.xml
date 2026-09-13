@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Exactly one path, and deliberately so. The provider can expose only files/export/, which is
+  where Export.build writes its archive and nowhere else. It cannot reach the databases, the
+  shared_prefs, the basemap regions, or the binned position history — so a mistake in an intent,
+  or a malicious app guessing a URI, cannot widen what leaves the device beyond the single
+  archive the user chose to share.
+-->
+<paths>
+    <files-path name="export" path="export/" />
+</paths>

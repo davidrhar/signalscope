@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Without this the Shizuku manager app is invisible to us on Android 11+ and we can only
+         ever report "absent or not running", never "present but not authorised". -->
+    <queries>
+        <package android:name="moe.shizuku.privileged.api" />
+    </queries>
+
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!--
+      ACCESS_BACKGROUND_LOCATION is deliberately NOT declared.
+
+      CollectorService DOES now request fixes while the UI is in the background, and still does
+      not need this permission. A service running as foregroundServiceType="location" is entitled
+      to location updates with the app backgrounded; ACCESS_BACKGROUND_LOCATION governs the
+      different case of a background fix with no such service, which this app never does. The
+      earlier version of this comment said the collector was foreground-only, which was true when
+      written and stopped being true once the 2026-09-12 excursion recorded twenty-five minutes
+      of travel and zero position fixes.
+
+      So declaring it would still buy no capability, would cost the user a permission they cannot
+      reason about, and would cost the listing a background-location declaration on review. The
+      decision is unchanged; only the reasoning behind it needed correcting. Position is instead
+      gated in CollectorService.locationPolicy(), which asks for it only while the phone is
+      actually out in the world.
+    -->
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- requestNetwork() needs this. Without it the cellular-bound probe silently never runs,
+         which is how it failed the first time: zero probe rows and no error anywhere. -->
+    <uses-permission android:name="android.permission.CHANGE_NETWORK_STATE" />
+    <!-- Basemap vector tiles only (tiles.openfreemap.org). No telemetry, no upload path. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <!-- specialUse is the one type Android 15+ still lets a service start from boot. See BootReceiver. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- Resume a monitoring run after the phone restarts, if the user left collection on. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:allowBackup="false"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:usesCleartextTraffic="false"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:label="SignalScope"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.SignalScope">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:label="SignalScope">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <provider
+            android:name="rikka.shizuku.ShizukuProvider"
+            android:authorities="${applicationId}.shizuku"
+            android:multiprocess="false"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
+        <service
+            android:name=".collect.CollectorService"
+            android:exported="false"
+            android:foregroundServiceType="location|dataSync|specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Continuous on-device network diagnostics, started and stoppable by the user. Used only when a location service is not permitted, such as after a restart. No collected data leaves the device." />
+        </service>
+
+        <!--
+          Exported only because the system cannot deliver boot broadcasts otherwise. The receiver
+          acts on BOOT_COMPLETED and MY_PACKAGE_REPLACED alone and ignores everything else, and
+          starts nothing unless the user previously turned collection on.
+        -->
+        <receiver
+            android:name=".collect.BootReceiver"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
+        <!--
+          The only route by which collected data can leave this device, and it is a one-way,
+          user-initiated one.
+
+          `exported="false"` means no other app can ask this provider for anything; the sole way
+          to read it is a URI the user hands over through the system share sheet, which grants a
+          single app read access to a single file for as long as that share lasts. That keeps the
+          security review's position true in substance: nothing can pull the data, the user can
+          only push one archive.
+
+          The provider is scoped by res/xml/file_paths.xml to files/export/ alone, so it cannot
+          reach the databases, the preferences or the binned position history even in principle.
+        -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.export"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+
+    </application>
+</manifest>

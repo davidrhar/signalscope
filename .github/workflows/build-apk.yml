@@ -1,0 +1,56 @@
+name: Build APK
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # AGP 8.10 needs a JDK it supports. 25/26 are too new; 21 is the safe floor.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      # The Android SDK is preinstalled on the runner and ANDROID_HOME is set, so no
+      # local.properties is needed -- which is why that file stays gitignored.
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build debug APK
+        run: ./gradlew :app:assembleDebug --no-daemon --stacktrace
+
+      - name: Name the artifact by commit
+        id: meta
+        run: echo "sha=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: signalscope-debug-${{ steps.meta.outputs.sha }}
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 90
+
+      # A rolling prerelease so there is always a directly downloadable APK, rather than
+      # an artifact zip that needs a GitHub login to fetch.
+      - name: Publish rolling release
+        if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Latest debug build
+          prerelease: true
+          body: |
+            Debug APK built from `${{ github.sha }}`.
+
+            Unsigned debug build for testing. Android will warn about installing from an
+            unknown source. It collects only to the device: nothing is uploaded anywhere.
+          files: app/build/outputs/apk/debug/app-debug.apk
