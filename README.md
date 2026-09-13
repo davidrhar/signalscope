@@ -2,6 +2,26 @@
 
 An Android app for diagnosing *why* mobile data drops — not just showing that it did.
 
+> **⚠️ Research build — not ready for general use.**
+>
+> SignalScope is a single-developer research instrument, not a finished app. It does collect your
+> own diagnostics and keeps them on your phone — nothing is uploaded anywhere — but please be aware
+> before installing:
+>
+> - **Updating erases your data.** Each published APK is signed with a different, throwaway key,
+>   so Android will not install one over another. Updating means uninstalling, which deletes
+>   everything collected.
+> - **It is a debug build.** Anyone with USB-debugging access to your unlocked phone can read the
+>   collected data, which includes coarse location cells and the mobile masts you connected to.
+> - **Collection may stop in the background.** The app does not yet ask to be exempted from battery
+>   optimisation, so many phones will put it to sleep and the data will have gaps.
+> - **It runs experiments automatically.** It can hold the mobile radio awake for battery-cost
+>   experiments and runs small connection and speed tests, which use some battery and up to about
+>   1 MB of mobile data a day.
+>
+> A build intended for other people — permanent signing, a release build, a battery-exemption prompt
+> and experiments that are opt-in — has not been made yet.
+
 Status: **Phase 1 running on hardware.** A debug APK builds, installs and collects live on the
 reference device (a recent Android 16 flagship, DSDS dual-SIM). The docs below are the design;
 `app/` is the implementation.

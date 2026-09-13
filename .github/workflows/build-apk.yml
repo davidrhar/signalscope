@@ -46,11 +46,24 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: latest
-          name: Latest debug build
+          name: Latest research build (not for general use)
           prerelease: true
           body: |
             Debug APK built from `${{ github.sha }}`.
 
-            Unsigned debug build for testing. Android will warn about installing from an
-            unknown source. It collects only to the device: nothing is uploaded anywhere.
+            **Research build — not ready for general use.** It collects your own diagnostics and
+            keeps them on the device; nothing is uploaded anywhere. Before installing, note:
+
+            - **Updating erases your data.** Every build is signed with a different throwaway debug
+              key, so Android will not install one over another. Updating means uninstalling,
+              which deletes everything collected.
+            - **It is a debug build.** Anyone with USB-debugging access to the unlocked phone can
+              read the collected data, including coarse location cells and connected masts.
+            - **Background collection may stop.** It does not yet request a battery-optimisation
+              exemption, so many phones will put it to sleep.
+            - **It runs experiments automatically**, holding the mobile radio awake and running
+              small connection and speed tests: some battery, and up to about 1 MB of mobile data
+              a day.
+
+            Android will warn about installing from an unknown source. See the README for details.
           files: app/build/outputs/apk/debug/app-debug.apk
