@@ -855,8 +855,10 @@ private fun LayerPanel(m: MapModel, layer: MapLayer) {
                 T.Warn
             ) {
                 ERow("surveyed", "${surveyed.size} of ${m.bins.size} bins")
+                // "four bars, failing" is wider than the label column and rendered as "four bars,"
+                // on a 1080p phone, which reads as a truncated thought rather than a statistic.
                 ERow(
-                    "four bars, failing",
+                    "failing at 4/4",
                     "$fullBarsFailing bin${if (fullBarsFailing == 1) "" else "s"}",
                     if (fullBarsFailing > 0) T.Bad else T.Dim
                 )

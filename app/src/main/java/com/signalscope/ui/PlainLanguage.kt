@@ -233,20 +233,40 @@ object PlainLanguage {
 
         return when {
             // A failure rate whose lower bound clears the floor is a finding, not a wobble.
-            rate < MapProbeJoin.SUCCESS_FLOOR && ci[0] < MapProbeJoin.SUCCESS_FLOOR -> Verdict(
-                headline = "The connection keeps failing to wake up.",
-                body = buildString {
-                    append("${s.coldFailures} of the ${s.coldTotal} times something needed the ")
-                    append("sleeping mobile connection, it did not come back. ")
-                    failWait?.let {
-                        append("Each of those was a wait of about ${ms(it)} before whatever was ")
-                        append("waiting gave up. ")
-                    }
-                    append("Success rate ${interval(ci[0], ci[1])}, on the measurements so far.")
-                },
-                tone = Tone.BAD,
-                numbers = numbers
-            )
+            rate < MapProbeJoin.SUCCESS_FLOOR && ci[0] < MapProbeJoin.SUCCESS_FLOOR -> {
+                // ...but a failure rate is not a cause. This branch used to name waking as the
+                // culprit on the cold rate alone, never once looking at the warm one. On the
+                // reference device that produced "the connection keeps failing to wake up" while
+                // an already-awake connection was failing at nearly the same rate -- a true number
+                // under a false heading, which is worse than no heading. Waking is only blamed
+                // where being awake demonstrably helps.
+                val warmCi = s.warmSuccess
+                    ?.takeIf { s.warmTotal >= MIN_WAKEUPS }
+                    ?.let { MapBinBuilder.wilson(it, s.warmTotal) }
+                val wakingIsTheDifference = warmCi == null || warmCi[0] > ci[1]
+                Verdict(
+                    headline =
+                        if (wakingIsTheDifference) "The connection keeps failing to wake up."
+                        else "The connection keeps failing, and not only when waking it.",
+                    body = buildString {
+                        append("${s.coldFailures} of the ${s.coldTotal} times something needed the ")
+                        append("sleeping mobile connection, it did not come back. ")
+                        failWait?.let {
+                            append("Each of those was a wait of about ${ms(it)} before whatever ")
+                            append("was waiting gave up. ")
+                        }
+                        append("Success rate ${interval(ci[0], ci[1])}, on the measurements so far.")
+                        if (!wakingIsTheDifference) {
+                            append(" A connection that was already in use failed about as often ")
+                            append("(${s.warmTotal - s.warmFailures} of ${s.warmTotal} worked), ")
+                            append("so waking it is not what separates the failures — the trouble ")
+                            append("is with the connection itself, not with it having been idle.")
+                        }
+                    },
+                    tone = Tone.BAD,
+                    numbers = numbers
+                )
+            }
             s.coldFailures == 0 && slow -> Verdict(
                 headline = "The connection always works, but waking it up is slow.",
                 body = wakeUpSentence(s) + " Nothing failed in ${s.coldTotal} wake-ups, so this is " +

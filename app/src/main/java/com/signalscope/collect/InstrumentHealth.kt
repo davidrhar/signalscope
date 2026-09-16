@@ -132,9 +132,10 @@ object InstrumentHealth {
             )
             else -> Check(
                 "Signal readings", Level.DEGRADED,
-                "Last reading was ${ageWords(sim.signalMillis)} ago. Readings older than a few " +
-                    "seconds are not used for measurement, so anything computed now would be " +
-                    "describing a gap rather than the network.",
+                (if (sim.signalMillis <= 0L) "No signal reading has arrived yet."
+                 else "Last reading was ${ageWords(sim.signalMillis)} ago.") +
+                    " Readings older than a few seconds are not used for measurement, so anything " +
+                    "computed now would be describing a gap rather than the network.",
                 "This usually clears by itself; the app polls the radio directly when the push " +
                     "stream goes quiet."
             )
@@ -143,12 +144,18 @@ object InstrumentHealth {
         // ---- service state -------------------------------------------------------------------
         // Event-driven, so silence is normal; only a very long silence is evidence of anything.
         if (sim != null) {
+            // "for never" is what the naive version rendered when no update had ever arrived, which
+            // reads as a typo and buries the one case that actually matters -- never heard from at
+            // all is a different state from heard from a while ago, and only the first is worth a
+            // reader's attention.
             checks += Check(
                 "Network registration",
                 if (sim.serviceStale()) Level.DEGRADED else Level.OK,
-                if (sim.serviceStale())
-                    "No registration update for ${ageWords(sim.serviceMillis)}."
-                else "Reported ${ageWords(sim.serviceMillis)} ago."
+                when {
+                    sim.serviceMillis <= 0L -> "No registration update has arrived yet."
+                    sim.serviceStale() -> "No registration update for ${ageWords(sim.serviceMillis)}."
+                    else -> "Reported ${ageWords(sim.serviceMillis)} ago."
+                }
             )
         }
 
