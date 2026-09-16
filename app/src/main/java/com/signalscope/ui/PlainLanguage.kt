@@ -299,11 +299,17 @@ object PlainLanguage {
     /**
      * The finding, stated only where this phone's own measurements support it.
      *
-     * The excursion's contrast — 12.3 % of cold wake-ups failing against 0 of 36 while the bearer
-     * carried traffic — is what the whole feature rests on, but it is a measurement from one trip
-     * and it is not this user's. So this returns null unless the same contrast is present in the
-     * rows in hand, with enough warm probes for the comparison to mean anything. No local
-     * evidence, no claim.
+     * The excursion's contrast — cold wake-ups failing far more often than probes on a bearer
+     * already carrying traffic — is what the whole feature rests on, but it is a measurement from
+     * one trip and it is not this user's. So this returns null unless the same contrast is present
+     * in the rows in hand. No local evidence, no claim.
+     *
+     * The gate used to be `warm > cold` with a minimum count on each side, and that is not enough.
+     * The original 12.3 %-against-0 % reading of the excursion passed exactly that test and did not
+     * survive a larger sample: it fell to roughly 1.8x at p = 0.12, mostly a latency effect rather
+     * than a failure class. A raw difference between two small proportions is the shape a
+     * coin-flip makes. So the two Wilson intervals must now clear each other before this speaks at
+     * all -- which means the panel will stay quiet longer, and be worth reading when it does.
      */
     fun dormancyContrast(s: ProbeStats): Verdict? {
         if (s.coldTotal < MIN_WAKEUPS || s.warmTotal < MIN_WAKEUPS) return null
@@ -311,6 +317,11 @@ object PlainLanguage {
         val warm = s.warmSuccess ?: return null
         if (s.coldFailures == 0) return null
         if (warm <= cold) return null
+        // Non-overlapping 95 % intervals. Conservative -- it is stricter than a two-proportion
+        // test -- and that is the trade wanted here, because this headline names a cause.
+        val coldHi = MapBinBuilder.wilson(cold, s.coldTotal)[1]
+        val warmLo = MapBinBuilder.wilson(warm, s.warmTotal)[0]
+        if (coldHi >= warmLo) return null
         return Verdict(
             headline = "It is not a weak signal. It is a connection that keeps going to sleep.",
             body = "When the connection had been idle, ${s.coldFailures} of ${s.coldTotal} " +
@@ -323,12 +334,24 @@ object PlainLanguage {
         )
     }
 
-    /** Why the numbers everyone else leads with are not the headline here. */
+    /**
+     * Why the numbers everyone else leads with are not the headline here.
+     *
+     * This string used to carry the excursion's dormancy figures -- "25 minutes of real use"
+     * against "one wake-up in eight" -- as settled fact, shown to every reader on every visit and
+     * gated on nothing. `excursion-findings.md` had already been corrected to say that contrast
+     * rested on 93 probes, was mainly a latency effect, and did not reach significance below a
+     * minute of idle. The correction never reached this sentence, which is precisely the failure
+     * mode [InstrumentHealth] exists to prevent, committed in the copy instead of the data.
+     *
+     * The claim that survives is the one this app can defend from first principles and from any
+     * user's own rows: strength and outcome are different measurements. No borrowed numbers.
+     */
     fun signalIsTheWeather(): String =
-        "Signal strength is not part of this verdict on purpose. Measured on this project: 25 " +
-            "minutes of real use at a signal quality any textbook calls bad broke nothing at " +
-            "all, while an idle connection at good signal failed one wake-up in eight. Bars " +
-            "describe the weather; what is above describes whether it worked."
+        "Signal strength is not part of this verdict on purpose. It measures how loudly the " +
+            "tower reaches you, which is not the same question as whether your data got " +
+            "through — a connection can hold full bars and still fail, and the readings above " +
+            "are the ones taken from your connection actually being used."
 
     private fun healthNumbers(s: ProbeStats): List<Pair<String, String>> = buildList {
         add("wake-ups" to
@@ -622,10 +645,11 @@ object PlainLanguage {
      * omission.
      */
     fun warmthScope(): String =
-        "What this fixes, and what it does not: it removes one measured failure — a connection " +
-            "that had gone to sleep and then took seconds to wake, which happened to one wake-up " +
-            "in eight on an idle connection. It does nothing for a connection lost while moving " +
-            "at speed, on a train or in a car: that is a different mechanism, and holding the " +
+        "What this fixes, and what it does not: it targets one measured delay — a connection " +
+            "that had gone to sleep and then took seconds to wake. The effect is mostly that " +
+            "delay rather than outright failure, and it is smaller than early measurements on " +
+            "this project suggested. It does nothing for a connection lost while moving at " +
+            "speed, on a train or in a car: that is a different mechanism, and holding the " +
             "connection awake does not address it."
 
     // ================================================================= upload vs download

@@ -789,8 +789,8 @@ private fun LayerPanel(m: MapModel, layer: MapLayer) {
                 "Coloured by measured outcome.",
                 "The verdict is the probe result on the cellular bearer and the validated " +
                     "fraction of the samples cellular actually carried. Signal is a layer you " +
-                    "can switch to, not an input: a median SINR of 0 dB produced zero failures " +
-                    "across 25 minutes of real use.",
+                    "can switch to, not an input — it is measured here, never assumed to " +
+                    "predict the outcome.",
                 T.Good
             ) {
                 ERow(
@@ -837,23 +837,26 @@ private fun LayerPanel(m: MapModel, layer: MapLayer) {
             }
         }
         MapLayer.RSRP -> {
-            // Both classes count as the lie now: no route at four bars, and a cold wake-up that
-            // fails at four bars. The second is the one this device actually measured.
-            val lie = surveyed.count {
+            // Two ways a bin shows full bars and is still bad: no route at four bars, and a cold
+            // wake-up that fails at four bars. Counted together because the bar formula misses
+            // both, which is the whole reason this layer is drawn.
+            val fullBarsFailing = surveyed.count {
                 (it.cls == 1 || it.cls == 4) && MapBinBuilder.carrierBars(it.rsrpP50) >= 4
             }
             Banner(
-                "This layer is the lie.",
+                "Strength, not quality.",
                 "Coloured by the platform's default bar formula — thresholds " +
                     "${MapBinBuilder.LTE_BAR_THRESHOLDS.joinToString(",", "[", "]")}, " +
-                    "params=1, so the bar is RSRP alone. Bins outlined red are green here and " +
-                    "failing on the quality layer.",
-                T.Bad
+                    "params=1, so the bar is RSRP alone. It measures how loudly the tower " +
+                    "reaches you, not whether data gets through. Bins outlined red show full " +
+                    "bars here and fail on the quality layer.",
+                T.Warn
             ) {
                 ERow("surveyed", "${surveyed.size} of ${m.bins.size} bins")
                 ERow(
-                    "four bars, failing", "$lie bin${if (lie == 1) "" else "s"}",
-                    if (lie > 0) T.Bad else T.Dim
+                    "four bars, failing",
+                    "$fullBarsFailing bin${if (fullBarsFailing == 1) "" else "s"}",
+                    if (fullBarsFailing > 0) T.Bad else T.Dim
                 )
                 ERow(
                     "median rsrp here",
@@ -871,10 +874,11 @@ private fun LayerPanel(m: MapModel, layer: MapLayer) {
             val sinrMs = MapBinBuilder.pooledMs(surveyed) { it.sinrHist }
             Banner(
                 "Descriptive, not diagnostic.",
-                "Median SINR per bin, over time rather than readings. It answers “can we exchange data” where RSRP only " +
-                    "answers “can I hear the tower”, and it is still not the verdict: " +
-                    "0 dB median produced 0 failures in 68 probes while a dormant bearer at good " +
-                    "signal failed 12.3 % of cold wake-ups. Kept as a layer, demoted as evidence.",
+                "Median SINR per bin, over time rather than readings. It answers “can we exchange " +
+                    "data” where RSRP only answers “can I hear the tower”. Closer to the thing " +
+                    "that fails, and still not the verdict — bins with a bad median have run " +
+                    "stretches of usable data, and bins with a good one have dropped. The " +
+                    "outcome layer is the verdict; this is the best available explanation of it.",
                 T.Warn
             ) {
                 ERow(
@@ -1108,7 +1112,8 @@ private fun Legend(m: MapModel, layer: MapLayer, onClose: () -> Unit) {
                     "${c.bad} of ${c.surveyed} surveyed bins lose the route; " +
                         "${c.badFullBars} of those show 4 of 4 bars" +
                         (c.medianBadRsrp?.let { ", median ${it} dBm" } ?: "") +
-                        ". The RSRP layer is not a courtesy — it is the exhibit.",
+                        ". That gap is why this layer is drawn: the bars agreed, the connection " +
+                        "did not.",
                     color = T.Faint, fontSize = 9.sp, lineHeight = 12.sp
                 )
             }
@@ -1283,10 +1288,9 @@ private fun BinSheet(b: Bin, m: MapModel?, layer: MapLayer, onClose: () -> Unit)
             ERow("median sinr", b.sinrP50?.let { "$it dB" } ?: "not measured")
             Text(
                 "Medians are over time spent here, not over readings, so minutes with the screen " +
-                    "on do not outvote the rest. " +
-                    "Still here because they are worth seeing, no longer deciding anything: a median " +
-                    "SINR of 0 dB ran 25 minutes of real cellular use with zero probe failures, " +
-                    "while a dormant bearer at good signal failed 12.3 % of cold wake-ups.",
+                    "on do not outvote the rest. Shown because they are worth seeing, not " +
+                    "because they decide anything — the outcome rows above are what this bin " +
+                    "was coloured by.",
                 color = T.Faint, fontSize = 9.sp, lineHeight = 12.sp
             )
 
@@ -1398,7 +1402,7 @@ private fun LayerFocus(b: Bin, layer: MapLayer) {
             ERow(
                 "and the outcome",
                 if (bars >= 4 && (b.cls == 1 || b.cls == 4))
-                    "four bars and failing — this bin is the exhibit"
+                    "four bars, and failing anyway"
                 else "${Outcome.of(b.cls).label}, on measured outcomes",
                 T.Dim
             )

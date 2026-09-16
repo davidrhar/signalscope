@@ -205,8 +205,16 @@ class TelephonyCollector(
             nbrServingCi[subId] = servingCi
 
             val nowWall = System.currentTimeMillis()
+            // Non-serving cells, plus one exception. Under non-standalone 5G the serving cell is
+            // LTE and the NR carrier is a secondary leg; some modems report that leg as
+            // `isRegistered`, which the plain filter would discard. Four days of collection
+            // produced 14,794 LTE neighbour rows and zero NR ones, so whatever the cause, this
+            // side of it costs nothing to rule out. Only while the serving cell is not itself NR:
+            // on standalone 5G a registered NR cell IS the serving cell, and recording it here
+            // would file the serving cell as its own neighbour.
+            val servingIsNr = sim?.cellRat == Bands.NR
             val rows = cellInfo.asSequence()
-                .filter { !it.isRegistered }
+                .filter { !it.isRegistered || (it is CellInfoNr && !servingIsNr) }
                 .mapNotNull { runCatching { neighbourOf(subId, it, nowElapsed, nowWall) }.getOrNull() }
                 .sortedByDescending { it.rsrp }
                 .take(NEIGHBOURS_KEPT)
