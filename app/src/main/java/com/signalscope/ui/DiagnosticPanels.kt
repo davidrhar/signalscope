@@ -20,8 +20,6 @@ import com.signalscope.collect.InstrumentHealth
 import com.signalscope.collect.CellProbe
 import com.signalscope.collect.Fault
 import com.signalscope.collect.LiveState
-import com.signalscope.collect.WarmthBlock
-import com.signalscope.collect.WarmthExperiment
 import com.signalscope.store.PingPong
 import com.signalscope.store.MapProbeJoin
 import kotlinx.coroutines.Dispatchers
@@ -63,7 +61,6 @@ fun DiagnosticPanels() {
     JourneyPanel()
     PingPongPanel()
     UpDownPanel()
-    BatteryCostPanel()
 }
 
 // ================================================================== connection health
@@ -95,7 +92,8 @@ private fun probeStatsFor(ctx: Context): PlainLanguage.ProbeStats {
                 cold = it.cold,
                 onBearer = it.onBearer,
                 // "No address of this family" is a property of the connection's configuration,
-                // not a failure to wake up. WarmthExperiment excludes it from the same endpoint.
+                // not a failure to wake up, so it is flagged here and counted apart from the
+                // cold-probe failures rather than inflating them.
                 noAddressOfFamily = it.probeType.startsWith("DNS") && !it.ok
             )
         }
@@ -166,8 +164,9 @@ fun ConnectionHealthPanel(compact: Boolean = false) {
 
         VerdictBlock(v)
 
-        // Stated only where this phone's own rows show the contrast. The excursion's 12.3 % is
-        // not this user's measurement and is not presented as one.
+        // Stated only where this phone's own rows show the contrast, and only where the two
+        // Wilson intervals clear each other. The excursion's figure is not this user's
+        // measurement and is not presented as one.
         PlainLanguage.dormancyContrast(s!!)?.let { c ->
             Spacer(Modifier.height(12.dp))
             Divider()
@@ -338,47 +337,6 @@ fun UpDownPanel() {
     AccentCard(toneColor(v.tone)) {
         VerdictBlock(v)
         summary?.let { RawReport("the measurement's own report", it.report) }
-    }
-}
-
-// ================================================================== battery cost
-
-@Composable
-fun BatteryCostPanel() {
-    val ctx = LocalContext.current
-    val st by WarmthExperiment.state.collectAsStateWithLifecycle()
-    var saved by remember { mutableStateOf<List<WarmthBlock>>(emptyList()) }
-
-    // The run happens once, in the service, and may well have finished in a previous process --
-    // so the saved blocks are read rather than waiting for a live run that will never come again.
-    LaunchedEffect(st.blocks.size) {
-        saved = withContext(Dispatchers.IO) {
-            runCatching { WarmthExperiment.load(ctx) }.getOrDefault(emptyList())
-        }
-    }
-
-    val blocks = if (st.blocks.isNotEmpty()) st.blocks else saved
-    val endpoint = blocks.firstOrNull()?.energyEndpoint ?: st.energyEndpoint
-    val summary =
-        if (blocks.isEmpty()) null
-        else runCatching { WarmthExperiment.summary(blocks, endpoint) }.getOrNull()
-    val v = PlainLanguage.batteryCost(st.running, st.block, st.total, st.arm, blocks, summary)
-
-    SecHead(
-        "Battery cost of keeping it awake",
-        when {
-            st.running -> "measuring · block ${st.block}/${st.total}"
-            blocks.isEmpty() -> "not measured"
-            else -> "${blocks.size} blocks"
-        }
-    )
-    AccentCard(toneColor(v.tone)) {
-        VerdictBlock(v)
-        st.note?.takeIf { it.isNotBlank() }?.let {
-            Spacer(Modifier.height(8.dp))
-            ERow("run note", it, T.Warn)
-        }
-        summary?.let { RawReport("the measurement's own report", it) }
     }
 }
 

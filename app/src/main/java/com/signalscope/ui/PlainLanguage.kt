@@ -6,7 +6,6 @@ import com.signalscope.collect.Mobility
 import com.signalscope.collect.HandoverPredictor
 import com.signalscope.collect.CellProbe
 import com.signalscope.collect.Fault
-import com.signalscope.collect.WarmthBlock
 import com.signalscope.store.MapBinBuilder
 import com.signalscope.store.MapProbeJoin
 
@@ -19,14 +18,20 @@ import com.signalscope.store.MapProbeJoin
  * a non-technical reader actually reads.
  *
  * **What the sentences are allowed to say.** `docs/excursion-findings.md` moved the diagnosis:
- * across 25 minutes of real cellular use a median SINR of 0 dB — bad by any textbook — produced
- * zero user-visible failures, while the same bearer left dormant behind Wi-Fi failed 12.3 % of
- * cold wake-ups (7 of 57), every failure a ~6 s timeout. Inside each probe pair the first probe
- * averaged 457 ms and peaked at 5.3 s against the second's 168 ms. So RSRP, RSRQ and SINR are the
- * weather and never the headline. The headline is outcomes: did the connection work, how long did
- * waking it take, how often did it fail.
+ * stretches of real cellular use at a median SINR any textbook calls bad produced no user-visible
+ * failures, while the same bearer left dormant behind Wi-Fi paid to be woken. So RSRP, RSRQ and
+ * SINR are the weather and never the headline. The headline is outcomes: did the connection work,
+ * how long did waking it take, how often did it fail.
  *
- * **Three rules, in order of how often they have been broken here.**
+ * **What they are not allowed to say is a number from that document.** This header used to quote
+ * the excursion's figures, and so did four strings below it, one shown to every reader on every
+ * visit and gated on nothing. The document had already been corrected to say those figures were
+ * roughly twice their true size and mostly a latency effect; the correction reached the document
+ * and never reached the copy. So: no borrowed measurement appears in any sentence this file
+ * produces. Every number a reader sees is interpolated from that reader's own rows, which is the
+ * only kind this layer can stand behind. Rule 4, and it is here because it was broken.
+ *
+ * **Four rules, in order of how often they have been broken here.**
  *
  *  1. Absent data reads as absent. A missing measurement says so and says what would produce it.
  *     A fresh install must never look healthy; it must look empty, because it is. This is the
@@ -36,6 +41,9 @@ import com.signalscope.store.MapProbeJoin
  *     collapsed to whichever end reads better.
  *  3. Nothing is written for one device, carrier, SIM, band or profile. Every noun in every
  *     sentence below comes from the state object it was handed.
+ *  4. No finding from this project's own past runs is quoted as fact in a sentence a user reads.
+ *     Findings get corrected; strings do not get corrected with them. If a claim cannot be made
+ *     from the rows in hand, it is not made.
  */
 object PlainLanguage {
 
@@ -109,8 +117,8 @@ object PlainLanguage {
      *
      * [noAddressOfFamily] marks a probe that never ran because the bearer had no address of the
      * family it asked for. That is a property of the connection's configuration, not a failure to
-     * wake up, and [WarmthExperiment] excludes it from the same endpoint for the same reason. It
-     * is counted and reported separately rather than quietly dropped.
+     * wake up, so counting it as one would inflate every wake-up figure on the screen. It is
+     * counted and reported separately rather than quietly dropped.
      */
     data class ProbeObservation(
         val ok: Boolean,
@@ -749,156 +757,6 @@ object PlainLanguage {
                 "The comparison has run but has not reached a verdict it is willing to state.",
                 "More paired tests; the measurement's own words are below."
             ).copy(numbers = numbers)
-        }
-    }
-
-    // ================================================================= battery cost
-
-    private val COST_MA = Regex("""warmth costs ([+-]?\d+\.\d+) mA""")
-
-    /**
-     * What holding the connection awake costs, including all the ways the answer can honestly be
-     * "we do not know".
-     *
-     * [WarmthExperiment] reports validity before effect and has five distinct ways of declining to
-     * answer. Each one is rendered as a first-class outcome, because each one is the honest result
-     * of a run that could not measure what it set out to measure — and a UI that hid them behind
-     * "no data" would be throwing away the most useful thing the harness produces.
-     */
-    fun batteryCost(
-        running: Boolean,
-        block: Int,
-        total: Int,
-        arm: String,
-        blocks: List<WarmthBlock>,
-        summary: String?
-    ): Verdict {
-        val numbers = buildList {
-            add("blocks" to
-                if (blocks.isEmpty()) "none finished yet"
-                else "${blocks.size} finished · ${blocks.count { it.arm == "B" }} holding, " +
-                    "${blocks.count { it.arm == "A" }} not")
-            blocks.firstOrNull()?.let {
-                add("battery readout" to when (it.energyEndpoint) {
-                    "CHARGE_COUNTER" -> "fine-grained counter — can resolve ten minutes"
-                    "CAPACITY" -> "whole percent only — too coarse for ten minutes"
-                    else -> "this phone reports no usable battery figure"
-                })
-            }
-            if (blocks.any { it.charging }) {
-                add("discarded" to "${blocks.count { it.charging }} block(s) saw the charger, " +
-                    "which makes drain unmeasurable")
-            }
-        }
-
-        if (running) return Verdict(
-            headline = "Measuring the battery cost now — block $block of $total.",
-            body = "Half the blocks hold the connection awake and half do not, alternating, so " +
-                "the difference between them is the cost. It takes about an hour and runs once, " +
-                "by itself. Currently in the ${if (arm == "B") "holding" else "not holding"} half.",
-            tone = Tone.NEUTRAL,
-            measured = false,
-            toMeasure = "Leave the phone off Wi-Fi until the run finishes. A stretch of Wi-Fi " +
-                "mid-run invalidates it, because the connection is deliberately not held awake there."
-        ).copy(numbers = numbers)
-
-        if (blocks.isEmpty()) return absent(
-            "The battery cost has not been measured.",
-            "Holding a connection awake costs power, and how much is not assumed here — it is " +
-                "measured or it is left blank. Nothing has measured it on this phone yet.",
-            "It runs itself once, automatically, the first time the phone spends an hour on " +
-                "mobile data: six ten-minute blocks, half holding the connection awake, half not."
-        ).copy(numbers = numbers)
-
-        val s = summary ?: return absent(
-            "The battery cost has not been summarised.",
-            "${blocks.size} blocks were recorded but no summary could be produced from them.",
-            "Another run. The measurement needs blocks from both halves to compare."
-        ).copy(numbers = numbers)
-
-        return when {
-            s.contains("need both arms") -> absent(
-                "The run did not finish.",
-                "Only one half of the comparison was recorded, and one half on its own says " +
-                    "nothing about a difference.",
-                "A full run: six ten-minute blocks, alternating between holding the connection " +
-                    "awake and not."
-            ).copy(numbers = numbers)
-            s.contains("BLIND") -> absent(
-                "No result: the phone stopped reporting during the test.",
-                "For most of the run the radio readings never changed, which is what a phone with " +
-                    "its screen off looks like. The same snapshot read hundreds of times is not " +
-                    "hundreds of measurements, so the run is discarded rather than averaged.",
-                "A run with the screen on, or at least in use — and this is a real limit of " +
-                    "measuring a phone from an app on the phone."
-            ).copy(numbers = numbers)
-            s.contains("INVALID") -> absent(
-                "No result: the phone was on Wi-Fi for most of the test.",
-                "Holding the connection awake is deliberately switched off on Wi-Fi, so most of " +
-                    "this run measured nothing being done.",
-                "A run that stays on mobile data for the full hour."
-            ).copy(numbers = numbers)
-            s.contains("NO TREATMENT") -> absent(
-                "No result: the half that should have held the connection awake never did.",
-                "Something refused the hold for most of those blocks — most likely the low " +
-                    "battery gate, or Wi-Fi taking the connection back.",
-                "A run on mobile data with the battery above the low-battery floor."
-            ).copy(numbers = numbers)
-            s.contains("CONTAMINATED CONTROL") -> absent(
-                "No result: the comparison half was held awake too.",
-                "A real call or a Wi-Fi handover during the half that was supposed to do nothing " +
-                    "held the connection awake anyway, so the two halves were not different and " +
-                    "there is nothing to compare.",
-                "A quieter hour — no calls and no Wi-Fi changes during the run."
-            ).copy(numbers = numbers)
-            s.contains("COST NOT MEASURABLE") -> absent(
-                "This phone cannot measure the cost.",
-                "It reports its battery in whole percent, and one percent is worth about three " +
-                    "hours of the draw being looked for. Dividing two whole numbers here would " +
-                    "produce a figure that looks like a measurement and is not one.",
-                "A phone that exposes a fine-grained charge counter, or a much longer run. " +
-                    "Neither is something this app can arrange."
-            ).copy(numbers = numbers)
-            s.contains("COST UNMEASURED") -> absent(
-                "The cost could not be read from this run.",
-                "Every block in one half saw the charger, and a charging phone has no drain to " +
-                    "measure.",
-                "A run on battery, unplugged for the full hour."
-            ).copy(numbers = numbers)
-            s.contains("indistinguishable from noise") -> Verdict(
-                headline = "Holding the connection awake cost too little to measure.",
-                body = "The two halves drew the same power to within the resolution of this " +
-                    "measurement — under 1 mA apart over ten-minute blocks. That is a ceiling on " +
-                    "the cost, not a claim that it is zero.",
-                tone = Tone.GOOD,
-                numbers = numbers
-            )
-            else -> {
-                val ma = COST_MA.find(s)?.groupValues?.get(1)?.toDoubleOrNull()
-                Verdict(
-                    headline = when {
-                        ma == null -> "The run produced a cost figure."
-                        ma <= 0.0 -> "Holding the connection awake drew no extra power in this run."
-                        else -> "Holding the connection awake cost about %.1f mA.".format(ma)
-                    },
-                    body = when {
-                        ma == null ->
-                            "The measurement's own words are below; this panel will not restate " +
-                                "a number it cannot read out of them."
-                        ma <= 0.0 ->
-                            "The half that held the connection awake drew no more than the half " +
-                                "that did not. One hour of blocks cannot rule out a small cost — " +
-                                "it can only say this run did not see one."
-                        else ->
-                            "Measured over ten-minute blocks, half holding the connection awake " +
-                                "and half not. It is only paid while the connection is actually " +
-                                "being held — during a call, just after leaving Wi-Fi, or while " +
-                                "something is streaming — and never on Wi-Fi or on a low battery."
-                    },
-                    tone = if (ma != null && ma > 20.0) Tone.WATCH else Tone.GOOD,
-                    numbers = numbers
-                )
-            }
         }
     }
 

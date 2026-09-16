@@ -411,10 +411,11 @@ object CarrierFaults {
      * Reads `dumpsys telephony.registry` and parses the data-connection notifications out of it.
      *
      * **Verified by effect, not by exit code.** A Shizuku command that returns 0 may have produced
-     * nothing usable — PhaseA reported ten successful trials that changed nothing by trusting the
-     * exit status. So the only thing that counts as success here is having parsed at least one
-     * `notifyDataConnectionForSubscriber` record out of the output. Anything else sets a note and
-     * leaves detection on Tier 0, which is fully functional on its own.
+     * nothing usable — an earlier repair experiment trusted the exit status and so reported a run
+     * of successful trials that changed nothing on the device. The only thing that counts as
+     * success here is therefore having parsed at least one `notifyDataConnectionForSubscriber`
+     * record out of the output. Anything else sets a note and leaves detection on Tier 0, which is
+     * fully functional on its own.
      */
     private suspend fun tier2Sweep(ctx: Context) {
         if (ShizukuBridge.state.value != ShizukuState.READY) {

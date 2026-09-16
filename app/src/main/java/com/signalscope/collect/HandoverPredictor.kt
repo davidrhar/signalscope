@@ -17,8 +17,9 @@ import kotlinx.coroutines.flow.StateFlow
  *
  * The handover is the worst moment in everything this project has measured, and it is the only
  * one of its failures that is *predictable*. Three things happen at once when Wi-Fi drops: the
- * cellular radio has been dormant for hours and must be woken, which failed 12.3 % of the time
- * in the excursion data and cost ~6 s when it did; the IP address changes, which kills every open
+ * cellular radio has been dormant for hours and must be woken, which in the excursion data both
+ * failed more often and took seconds longer than a wake on a bearer already in use; the IP
+ * address changes, which kills every open
  * socket rather than merely pausing it, and is what makes an app say "reconnecting" instead of
  * stalling; and every app on the phone demands data in the same instant, so the wake-up happens
  * under the heaviest contention it will ever face.

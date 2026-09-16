@@ -27,12 +27,14 @@ import java.net.InetAddress
  * Keeps the cellular bearer out of RRC dormancy while — and only while — dormancy is what would
  * hurt.
  *
- * `docs/excursion-findings.md` is the whole justification. A cold probe on a dormant bearer failed
- * 7 of 57 times (12.3 %, every failure a ~6 s timeout); a cold probe while the bearer was already
- * carrying traffic failed 0 of 36 (P(0) ≈ 0.008). Inside each probe pair the first probe averaged
- * 457 ms and peaked at 5263 ms while the second, riding the connection the first established,
- * averaged 168 ms. Signal quality is not the cause: a median SINR of 0 dB produced no failure at
- * all across 25 minutes of real use. What fails is the idle→connected transition.
+ * `docs/excursion-findings.md` is the whole justification -- and it must be read with the dated
+ * correction at its head, not the headline figures underneath it. What survived a larger sample is
+ * this: a cold probe on a dormant bearer fails somewhat more often than one on a bearer already
+ * carrying traffic, and takes substantially longer either way, the delay being the larger and
+ * better-evidenced half of the effect. The original reading of that contrast was about twice the
+ * size it should have been and is not what this file rests on. Signal quality is not the cause --
+ * stretches of real use at a median SINR any textbook calls bad produced no failures at all. What
+ * costs is the idle→connected transition.
  *
  * RRC state belongs to the device, not to an app, so a connection held up by our datagram is held
  * up for every app on the phone. That is the point: this is not a self-serving keepalive, it is a
@@ -43,10 +45,10 @@ import java.net.InetAddress
  * gate is re-checked on every tick rather than once at the start, because all three of them —
  * transport, battery, what is playing — change underneath a long hold.
  *
- * What it costs and what it buys is [WarmthExperiment]'s question, not this file's. This file's
- * obligation is to be measurable: it records per-session duration, trigger, and the fraction of
- * the hold a datagram actually covered, and it persists a rolling summary so a restart does not
- * erase the evidence.
+ * What it costs and what it buys is not a question this file answers, and nothing here should be
+ * read as a claim that it works. Its obligation is to be measurable: it records per-session
+ * duration, trigger, and the fraction of the hold a datagram actually covered, and it persists a
+ * rolling summary so a restart does not erase the evidence.
  */
 data class WarmthSession(
     val trigger: String,
@@ -129,7 +131,8 @@ object BearerWarmth {
 
     /**
      * Shorter than a typical LTE RRC inactivity timer, so the connection is genuinely held rather
-     * than re-promoted every interval. Same value and same reason as [KeepaliveExperiment].
+     * than re-promoted every interval — half [DORMANCY_MS], so a datagram lands well inside the
+     * silence that would drop the bearer rather than racing it.
      */
     private const val KEEPALIVE_MS = 5_000L
 
@@ -183,10 +186,10 @@ object BearerWarmth {
     private const val RECENT_KEEP = 40
 
     /**
-     * 12 bytes to 1.1.1.1:53, exactly as [KeepaliveExperiment.holdConnection] sends it. A literal
-     * address rather than a name so no DNS is involved: resolution on a non-default network is the
-     * part that blocks (see [CellProbe.probeAndRecord]), and the point here is to touch the radio,
-     * not to reach a service. Nothing carrier- or device-specific: any routable destination does.
+     * 12 bytes to 1.1.1.1:53. A literal address rather than a name so no DNS is involved:
+     * resolution on a non-default network is the part that blocks (see [CellProbe.probeAndRecord]),
+     * and the point here is to touch the radio, not to reach a service. Nothing carrier- or
+     * device-specific: any routable destination does.
      */
     private const val TARGET_HOST = "1.1.1.1"
     private const val TARGET_PORT = 53
@@ -235,8 +238,7 @@ object BearerWarmth {
     }
 
     /**
-     * Hold the bearer now, for [durationMs], under the label [reason]. For a manual test, and for
-     * [WarmthExperiment]'s treatment arm.
+     * Hold the bearer now, for [durationMs], under the label [reason]. For a manual test.
      *
      * The hard gates still apply. A one-shot hold while Wi-Fi holds the default route would warm a
      * bearer nothing rides on, which is pure battery cost — so it is refused and says so in
@@ -434,8 +436,8 @@ object BearerWarmth {
     ): Gate {
         // The single most important gate. While Wi-Fi holds the default route nothing rides on
         // cellular, so warming it is battery spent for no user-visible benefit whatsoever. This is
-        // also why the 12.3 % dormant-bearer failure rate in the findings was harmless in
-        // practice: it was measured on a bearer nobody was using.
+        // also why the dormant-bearer penalty in the findings was harmless in practice: it was
+        // measured on a bearer nobody was using.
         if (transport != "CELLULAR") {
             // The one exception, and it is deliberately narrow. Warming while Wi-Fi still holds
             // the route is normally pure cost -- but the Wi-Fi-to-cellular handover is the worst

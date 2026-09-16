@@ -314,10 +314,11 @@ data class Bin(
     /**
      * Cold-wake-up success rate: the single number this bin exists to carry.
      *
-     * `excursion-findings.md` §2 — a dormant bearer failed 12.3 % of cold probes at good signal
-     * and an in-use one failed 0 of 36. The failure is the idle→connected transition, so the rate
-     * that predicts what a user feels is this one and not the overall probe rate, which is
-     * diluted by the warm second-of-pair probes that never pay promotion.
+     * `excursion-findings.md` §2 measured a dormant bearer failing cold probes at good signal
+     * where an in-use one did not, and its dated correction then halved that gap and recast it as
+     * mostly latency. Either way the cost falls on the idle→connected transition, so the rate
+     * closest to what a user feels is this one and not the overall probe rate, which is diluted by
+     * the warm second-of-pair probes that never pay promotion.
      */
     val coldSuccessFrac: Double?
         get() = if (coldProbeN == 0) null
@@ -969,9 +970,9 @@ object MapBinBuilder {
      * the one place where a wrong answer would be worst, because the wrong answer is green.
      *
      * **Class 4 is reachable.** `probe_result` exists now, so "validated but slow" can be found,
-     * and on this network it is the class that matters most: the excursion measured 0 failures in
-     * 68 probes while the bearer was in use and 12.3 % of cold wake-ups failing at good signal.
-     * A bin whose cold probes fail is a bin where apps stall on resume, and nothing in the signal
+     * and on this network it is the class that matters most: the excursion measured no failures
+     * at all while the bearer was in use, against cold wake-ups failing at good signal. A bin
+     * whose cold probes fail is a bin where apps stall on resume, and nothing in the signal
      * metrics shows it.
      *
      * Signal is still not in this function at all — see [rsrpColour] and [sinrColour], which keep
@@ -1066,8 +1067,8 @@ object MapBinBuilder {
         b.cellValidatedFrac?.let { it < 0.80 } == true ->
             if ((b.rsrpP50 ?: 0) < -115) 1 else 6
         // Validated, and probes still failed: cause 6, connected-but-broken path. On this network
-        // it is specifically the cold wake-up — 12.3 % of cold probes failed at good signal while
-        // the in-use bearer failed 0 of 36 (excursion-findings.md §2).
+        // it is specifically the cold wake-up, which failed at good signal where the in-use bearer
+        // did not (excursion-findings.md §2, and read its correction with it).
         b.probeFail > 0 -> 6
         b.reselectRate > 2 && b.speedKph < 5 -> 3
         // Wi-Fi held the route for most of the time spent here, and the route flapped.

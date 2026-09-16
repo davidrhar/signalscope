@@ -775,9 +775,11 @@ private class Pooled(bins: List<Bin>) {
 /**
  * The panel under the chips, per layer.
  *
- * Quality leads with the cold-wake-up rate because that is the number the measurements say
- * predicts failure: `excursion-findings.md` §2 measured 12.3 % of cold probes failing on a
- * dormant bearer at good signal against 0 of 36 while the bearer was in use.
+ * Quality leads with the cold-wake-up rate because it is an outcome the user felt, where every
+ * signal figure on the other layers is an input that may or may not have mattered. `excursion-
+ * findings.md` §2 first measured a gap between cold and warm probes and its own dated correction
+ * then cut that gap to roughly half what was claimed, mostly latency rather than failure -- so the
+ * rate is led with as the most direct measurement available, not as a proven predictor.
  */
 @Composable
 private fun LayerPanel(m: MapModel, layer: MapLayer) {
@@ -1454,10 +1456,11 @@ private fun LayerFocus(b: Bin, layer: MapLayer) {
  * The block this change exists for: what happened to traffic that was actually on the cellular
  * bearer in this bin.
  *
- * Cold wake-up leads, because it is the number that predicted failure on the reference device —
- * 12.3 % of cold probes failed on a dormant bearer at good signal, against 0 of 36 while the
- * bearer was in use (`excursion-findings.md` §2). A bin whose cold probes fail is a bin where
- * apps stall on resume, and no signal metric shows it.
+ * Cold wake-up leads because it is the closest thing here to what a user actually notices: a bin
+ * whose cold probes fail is a bin where apps stall on resume, and no signal metric shows it. The
+ * reference device did measure cold probes failing more often than warm ones, but read
+ * `excursion-findings.md` §2 with its dated correction attached -- the effect there was about half
+ * the size first reported and mostly a delay rather than a failure.
  */
 @Composable
 private fun OutcomeBlock(b: Bin) {

@@ -107,7 +107,10 @@ socket keeps the connection in RRC_CONNECTED, and the measurements above say tha
 `requestNetwork` + `bindSocket` path the probe already uses.
 
 This is what `KeepaliveExperiment` was built to test, and the excursion tested it better than the
-A/B could have: real traffic, larger effect, and a control that arrived for free.
+A/B could have: real traffic, larger effect, and a control that arrived for free. That class was
+deleted on 2026-09-16 along with `WarmthExperiment`, `PhaseA` and `BearerMove`, when the app was
+reduced to an instrument; `BearerWarmth` — the thing they were testing — stayed. Read the
+correction at the top of this document before quoting any figure below it.
 
 Targeted rather than continuous, because the cost is battery:
 

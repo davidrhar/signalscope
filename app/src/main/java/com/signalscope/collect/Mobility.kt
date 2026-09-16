@@ -24,8 +24,8 @@ import org.json.JSONObject
  *
  * ## Why the handover counts are named the way they are
  *
- * The established finding is that a *dormant* bearer fails 12.3 % of cold wake-ups and a bearer
- * in use fails 0 %. A call sends data continuously, so dormancy cannot be the train trigger: it
+ * The finding behind the naming is that a *dormant* bearer pays to be woken where a bearer in use
+ * does not. A call sends data continuously, so dormancy cannot be the train trigger: it
  * has to be a different way into the same fragile step, and the working hypothesis is a handover
  * that loses its race — measure the new cell, report it, receive the command, switch, all before
  * the old cell fades. Lose that and the connection is rebuilt from nothing.
@@ -184,7 +184,7 @@ object Mobility {
     // ------------------------------------------------------------------------------------------
 
     /**
-     * 2 s, matching [ExcursionRecorder] and [KeepaliveExperiment]. Not arbitrary: the handover
+     * 2 s, matching [ExcursionRecorder] so the two streams line up. Not arbitrary: the handover
      * evidence window is a few seconds wide, so a slower tick would stop being able to say
      * whether a service drop sat beside a cell change or a minute away from it. It is a `delay`
      * in a coroutine and takes no wakelock, so on a dozing device it simply runs less often —
@@ -815,8 +815,8 @@ object Mobility {
 
     /**
      * A summary that refuses to overstate what it has. Coverage is checked before anything else,
-     * for the same reason [KeepaliveExperiment.summary] checks blindness first: a journey that
-     * saw nothing reports no handovers, which looks exactly like a journey that went perfectly.
+     * because blindness has to be ruled out before any count means anything: a journey that saw
+     * nothing reports no handovers, which looks exactly like a journey that went perfectly.
      */
     fun summary(j: Journey): String = buildString {
         append("%.1f min, %s (%s)\n".format(j.durationMs / 60_000.0, j.peakClass, j.bestConfidence))

@@ -5,13 +5,15 @@ import android.content.Context
 /**
  * The outcome side of a map bin: `probe_result` joined to bins, plus the per-bin cell composition.
  *
- * Why the map needs this at all — `excursion-findings.md` §1 and §2. 25 minutes of real cellular
- * use produced a median SINR of 0 dB, which is bad by any textbook, and **zero** failures in 68
- * probes. The same handset, with the radio dormant behind Wi-Fi, failed **12.3 % of cold
- * wake-ups** at good signal. So the signal metrics are the weather and not the diagnosis, and the
- * only table that holds a real outcome for the *cellular* bearer is `probe_result`. Until this
- * file existed the map's quality verdict came from `link_event`, which describes whatever holds
- * the default route — usually Wi-Fi.
+ * Why the map needs this at all — `excursion-findings.md` §1 and §2. A stretch of real cellular
+ * use at a median SINR any textbook calls bad produced no failures at all, while the same handset
+ * with the radio dormant behind Wi-Fi failed cold wake-ups at good signal. Read those sections
+ * with their dated correction attached: the cold-versus-warm gap survived a larger sample at
+ * roughly half the size first reported, and mostly as added latency rather than outright failure.
+ * What did not change is the direction of the argument — signal is not the outcome, and the only
+ * table holding a real outcome for the *cellular* bearer is `probe_result`. Until this file
+ * existed the map's quality verdict came from `link_event`, which describes whatever holds the
+ * default route — usually Wi-Fi.
  *
  * It lives beside `MapBins.kt` rather than inside it only to keep that file readable; it is read
  * from nowhere else.
@@ -27,8 +29,7 @@ object MapProbeJoin {
      * 457 ms mean for the first of a pair against 168 ms for the second. Cycles, on the other
      * hand, are 45 s apart at their densest (`CollectorService`: 45 s off Wi-Fi, 90 s or 5 min
      * on it). 30 s sits in that gap: it puts every first-of-pair in the cold set and every
-     * second-of-pair in the warm set, which is exactly the split the excursion analysis used to
-     * get 12.3 % against 0 %.
+     * second-of-pair in the warm set, which is exactly the split the excursion analysis used.
      *
      * It is a lower bound on warmth, not a proof of coldness: the radio can equally have been
      * woken by the user's own traffic moments earlier, and nothing in Phase 1 records that per

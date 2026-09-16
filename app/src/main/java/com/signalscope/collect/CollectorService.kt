@@ -116,48 +116,6 @@ class CollectorService : LifecycleService() {
             }
         }
 
-        // The keepalive A/B no longer autostarts. It asked whether holding the connection open
-        // reduces cell churn, and the 2026-09-12 excursion answered the underlying question far
-        // better than the synthetic version could -- real traffic, a larger effect, and a control
-        // that arrived for free. Worse, its arm B drives its own 5 s keepalive, which would warm
-        // the bearer during WarmthExperiment's control arm and quietly contaminate it. The runner
-        // stays for manual use; nothing starts it.
-        //
-        // What replaces it measures the cost rather than the existence of the effect: warmth is
-        // established, its battery price is not. Gated on cellular holding the default route
-        // because warmth is itself gated that way -- started on Wi-Fi the experiment would
-        // correctly report INVALID for want of any treatment, having spent an hour to do it.
-        runCatching {
-            io.launch {
-                val p = getSharedPreferences("warmth_exp", Context.MODE_PRIVATE)
-                // Re-arm rather than latch. The old rule was once per install, which meant a run
-                // that came back BLIND -- the screen went off, the radio stream stopped, and the
-                // blocks measured nothing -- left the user permanently unable to learn what
-                // warmth costs, with the app correctly but uselessly reporting "not measured"
-                // forever. An inconclusive verdict is not a completed experiment, so it does not
-                // consume the one attempt.
-                if (p.getBoolean("autostarted", false)) {
-                    val blocks = runCatching { WarmthExperiment.load(this@CollectorService) }
-                        .getOrDefault(emptyList())
-                    val conclusive = blocks.isNotEmpty() && runCatching {
-                        val s = WarmthExperiment.summary(blocks)
-                        listOf("BLIND", "INVALID", "NO TREATMENT", "CONTAMINATED")
-                            .none { tok -> s.contains(tok) }
-                    }.getOrDefault(true)
-                    if (conclusive) return@launch
-                    p.edit().putBoolean("autostarted", false).apply()
-                }
-                while (isActive) {
-                    if (LiveState.net.value.transport == "CELLULAR") {
-                        p.edit().putBoolean("autostarted", true).apply()
-                        WarmthExperiment.run(this@CollectorService, io, blocksPerArm = 3)
-                        return@launch
-                    }
-                    kotlinx.coroutines.delay(30_000)
-                }
-            }
-        }
-
         // Records off-Wi-Fi sessions unattended, since leaving Wi-Fi ends any session watching.
         runCatching { ExcursionRecorder.start(this, io) }
         // Classifies movement and records journeys. The train case is the project's largest
@@ -167,7 +125,6 @@ class CollectorService : LifecycleService() {
         runCatching { Mobility.start(this, io) }
 
         runCatching { ShizukuBridge.init(this) }
-        runCatching { PhaseA.recoverIfNeeded(this, io) }
 
         // Location is now the service's decision, not the Map tab's. See locationPolicy().
         runCatching { locationPolicy() }
@@ -189,11 +146,6 @@ class CollectorService : LifecycleService() {
         // days each produced a confident wrong answer and each was found by accident; this is the
         // check that stops that being the detection mechanism.
         runCatching { InstrumentHealth.start(this, io) }
-        // Watches both bearers at once so "is the other one better" can be answered from measured
-        // outcome rather than from signal. Holds its own Wi-Fi request -- binding a socket to a
-        // non-default network is only permitted while an app holds a request for it, which is the
-        // lesson CellProbe learned the hard way.
-        runCatching { BearerMove.start(this, io) }
         // Indoor likelihood from satellite signal, listened to only while position is already being
         // requested -- it never turns GNSS on by itself, because GNSS is the costliest radio here.
         runCatching { EnvironmentContext.start(this, io) }
@@ -376,7 +328,6 @@ class CollectorService : LifecycleService() {
         runCatching { BearerWarmth.stop() }
         runCatching { CarrierFaults.stop() }
         runCatching { InstrumentHealth.stop() }
-        runCatching { BearerMove.stop() }
         runCatching { EnvironmentContext.stop() }
         runCatching { CarrierAggregation.stop() }
         runCatching { ActionTraffic.stop() }

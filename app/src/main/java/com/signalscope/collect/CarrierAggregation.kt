@@ -45,10 +45,10 @@ import java.util.concurrent.Executors
  *
  * ## Verification by effect
  *
- * [PhaseA] once reported ten successful trials that changed nothing, because an exit code was
- * taken as evidence. Here, Tier 2 counts as working only when the output yielded at least one
- * parsed physical-channel record. A command that exits 0 and parses nothing is a format miss, and
- * says so in [State.tier2Status].
+ * An earlier repair experiment once reported a run of successful trials that changed nothing on the
+ * device, because an exit code was taken as evidence of effect. Here, Tier 2 counts as working only
+ * when the output yielded at least one parsed physical-channel record. A command that exits 0 and
+ * parses nothing is a format miss, and says so in [State.tier2Status].
  *
  * ## Reading the result
  *

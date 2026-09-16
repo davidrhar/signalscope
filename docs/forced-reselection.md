@@ -3,6 +3,14 @@
 **The question this answers: we cannot *select* a cell or a band, so is there nothing to do?
 No — we cannot aim, but we can *reroll and stop when we like the result*, and then hold it.**
 
+> **Status, 2026-09-16 — answered, and the implementation is gone.** Phase A ran and reported ten
+> successful trials that changed nothing: the landing distribution is degenerate on this network,
+> so the reroll has nothing to reroll into. That is the result, not a failure, and it is the whole
+> reason the code was removed. `PhaseA.kt` and `PhaseAPanel.kt` were deleted along with the other
+> concluded experiments when the app was reduced to an instrument; this document stays as the
+> record of what was tried and what came back. Nothing here should be re-implemented without new
+> evidence that the distribution is no longer degenerate.
+
 ---
 
 ## 1. Yes, cycles can be forced. They are not all the same thing

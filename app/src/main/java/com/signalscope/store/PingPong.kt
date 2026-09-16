@@ -60,7 +60,7 @@ import com.signalscope.collect.Mobility
  *     implied.
  *  2. **A frozen radio stream.** Rows repeat when nothing refreshes them, and a re-read snapshot
  *     is indistinguishable from a rock-steady cell. Each distinct reading is consumed once — the
- *     same rule [Mobility] and [KeepaliveExperiment] use, applied to stored rows — and
+ *     same rule [Mobility] uses live, applied here to stored rows — and
  *     [Report.timeCoverage] carries the result, because a run that saw nothing reports no ping-pong
  *     and no harm, which looks identical to a run that went perfectly.
  *
@@ -165,8 +165,8 @@ object PingPong {
 
     /**
      * One case-versus-control test. [invalid] non-null means the gates stopped it before any
-     * effect size existed, and [verdict] is then [Verdict.INVALID] — the ordering is deliberate
-     * and matches `KeepaliveExperiment.summary`: validity is the first question, not a footnote.
+     * effect size existed, and [verdict] is then [Verdict.INVALID] — the ordering is deliberate:
+     * validity is the first question, not a footnote under an effect size.
      */
     class Comparison(
         val label: String,
@@ -702,9 +702,9 @@ object PingPong {
 
     /**
      * The report the UI shows. Validity first, then the effect, then what the effect rests on —
-     * the order `Mobility.summary` and `KeepaliveExperiment.summary` both use, for the reason
-     * both of them give: a run that saw nothing produces a clean-looking null result, so nothing
-     * downstream may read a number before it has read whether the number means anything.
+     * the order `Mobility.summary` uses too, for the reason it gives: a run that saw nothing
+     * produces a clean-looking null result, so nothing downstream may read a number before it has
+     * read whether the number means anything.
      */
     fun summary(r: Report): String = buildString {
         r.error?.let { append("Could not read the database: $it\n") }

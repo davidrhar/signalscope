@@ -242,7 +242,7 @@ fun AccentCard(
 /**
  * A verbatim block for a measurement's own report.
  *
- * [CellProbe.asymSummary] and [WarmthExperiment.summary] both write their own verdicts, and those
+ * [CellProbe.asymSummary] and [BearerWarmth.summary] both write their own verdicts, and those
  * strings are the ones that were argued over. Showing them unedited underneath the plain sentence
  * is how a reader -- or a reviewer -- can check that the sentence above is a fair rendering.
  */
