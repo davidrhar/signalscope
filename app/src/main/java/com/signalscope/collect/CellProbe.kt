@@ -68,8 +68,57 @@ object CellProbe {
     /** Don't thrash the platform if rebuilding does not help. */
     private const val REBUILD_MIN_GAP_MS = 60_000L
 
+    /**
+     * A refused bind on a network the platform still knows means the *reservation* is gone, which
+     * only a new request fixes. Waiting a minute to try is a minute of measurements thrown away, so
+     * that case rebuilds on the first failure, rate-limited only enough not to thrash.
+     */
+    private const val REBUILD_FAST_GAP_MS = 20_000L
+
     /** True when the last attempts failed to bind, i.e. the instrument is broken, not the network. */
     val instrumentBroken: Boolean get() = bindFailStreak >= BIND_FAIL_REBUILD
+
+    /**
+     * The handle, but only if the platform still knows this network.
+     *
+     * Measured over four days: of 2,431 refused binds, **1,577 were against a network that no
+     * longer existed** -- the cellular network is torn down and replaced repeatedly while the phone
+     * sits idle (observed ids stepping 626 → 627 …), and `onLost` is not always delivered before
+     * the next probe fires. Every one of those was recorded as a failure to bind, which reads as a
+     * broken instrument, when in truth there was nothing to bind to yet.
+     *
+     * `getNetworkCapabilities` returns null once a network is gone, so a dead handle can be
+     * detected before a socket is ever created rather than inferred afterwards from an exception.
+     * A stale handle is dropped, a rebuild is asked for, and the caller is told there is no
+     * cellular network -- which is the truth, and is already excluded from every rate.
+     */
+    private fun liveCellular(): Network? {
+        val n = cellular ?: return null
+        val cm = appCtx?.getSystemService(ConnectivityManager::class.java) ?: return n
+        val caps = runCatching { cm.getNetworkCapabilities(n) }.getOrNull()
+        if (caps == null || !caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR)) {
+            cellular = null
+            rebuildReservation(REBUILD_FAST_GAP_MS)
+            return null
+        }
+        return n
+    }
+
+    /**
+     * Wait for a usable cellular network, rather than for the handle merely to be non-null.
+     *
+     * requestNetwork is asynchronous, and after a rebuild the grant arrives on a callback, so this
+     * is also what gives a repaired reservation time to take effect before the next probe decides
+     * there is nothing there.
+     */
+    private suspend fun awaitCellular(timeoutMs: Int): Network? {
+        var waited = 0
+        while (waited < timeoutMs) {
+            liveCellular()?.let { return it }
+            delay(500); waited += 500
+        }
+        return null
+    }
 
     private fun isBindDenied(t: Throwable): Boolean {
         var e: Throwable? = t
@@ -86,18 +135,24 @@ object CellProbe {
      * `requestNetwork` is the only way back: the Network handle we hold is valid-looking but
      * unusable, so nothing short of a new reservation restores it.
      */
-    private fun rebuildReservation() {
+    private fun rebuildReservation(minGapMs: Long = REBUILD_MIN_GAP_MS) {
         val ctx = appCtx ?: return
         val now = SystemClock.elapsedRealtime()
-        if (now - lastRebuildElapsed < REBUILD_MIN_GAP_MS) return
+        if (now - lastRebuildElapsed < minGapMs) return
         lastRebuildElapsed = now
         runCatching { stop(ctx) }
         runCatching { start(ctx) }
     }
 
+    /**
+     * A bind was refused. The handle was live when the socket was made -- [liveCellular] checked --
+     * so this is the other measured cause: 854 of the refusals happened on the *current* network,
+     * where the network exists and the app simply no longer holds a request for it. Only a new
+     * request restores that, and waiting for a second failure first just discards another probe.
+     */
     private fun noteBindFailure() {
         bindFailStreak++
-        if (bindFailStreak >= BIND_FAIL_REBUILD) rebuildReservation()
+        rebuildReservation(REBUILD_FAST_GAP_MS)
     }
 
     private fun noteBindSuccess() { bindFailStreak = 0 }
@@ -132,7 +187,7 @@ object CellProbe {
 
     /** Runs [body] with the cellular Network if one is available; no-op otherwise. */
     suspend fun <T> withCellular(body: suspend (Network) -> T): T? {
-        val n = cellular ?: return null
+        val n = liveCellular() ?: return null
         return body(n)
     }
 
@@ -230,9 +285,8 @@ object CellProbe {
         withContext(Dispatchers.IO) {
         // requestNetwork is asynchronous: the first probe after service start would otherwise fire
         // before onAvailable and report "no cellular network" when one was moments away.
-        var waited = 0
-        while (cellular == null && waited < 15_000) { delay(500); waited += 500 }
-        val net = cellular ?: return@withContext Result(false, "TCP", 0, "no cellular network", family)
+        val net = awaitCellular(15_000)
+            ?: return@withContext Result(false, "TCP", 0, "no cellular network", family)
         val t0 = SystemClock.elapsedRealtime()
         runCatching {
             // DNS on the cellular network, not the default one.
@@ -555,9 +609,7 @@ object CellProbe {
     suspend fun probeAsymmetric(ctx: Context): AsymResult {
         // requestNetwork is asynchronous, as in probeOnce: the first call after service start would
         // otherwise report "no cellular network" when one was moments away.
-        var waited = 0
-        while (cellular == null && waited < 15_000) { delay(500); waited += 500 }
-        val net = cellular
+        val net = awaitCellular(15_000)
             ?: return AsymResult(null, null, true, skipped = "no cellular network")
 
         // Claimed atomically. Two callers arriving together -- the tick loop and a UI button, say --
