@@ -225,6 +225,20 @@ fun MapScreen(modifier: Modifier = Modifier) {
 
     val m = model
 
+    /**
+     * Where "My location" points: the live fix if there is one, otherwise the bin the collector
+     * believes the phone is in. Null when neither exists -- the chip is then not drawn at all,
+     * rather than drawn and inert.
+     *
+     * Only bin centres are ever used, never a raw coordinate, which is the same rule the rest of
+     * the app follows: the finest thing that exists is a bin.
+     */
+    val here: Pair<Double, Double>? = when {
+        fix.lat != null && fix.lng != null -> fix.lat!! to fix.lng!!
+        m?.currentBin != null -> MapHex.cellToLatLng(m.currentBin!!).let { it[0] to it[1] }
+        else -> null
+    }
+
     Box(modifier.fillMaxSize().background(T.Page)) {
 
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
@@ -283,6 +297,17 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     Chip(if (legendOpen) "Hide legend" else "Legend", legendOpen) {
                         legendOpen = !legendOpen
                     }
+                    here?.let { (lat, lng) ->
+                        Spacer(Modifier.width(6.dp))
+                        Chip("My location", false) { mapState.recentre(lat, lng) }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+            } else if (here != null) {
+                // No bins yet, but the phone knows where it is -- the one case where recentring
+                // matters most, since there is nothing on screen to orient by.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Chip("My location", false) { mapState.recentre(here.first, here.second) }
                 }
                 Spacer(Modifier.height(6.dp))
             }
@@ -451,6 +476,26 @@ private class MapHolder {
                 mm.moveCamera(CameraUpdateFactory.newLatLngZoom(LatLng(c[0], c[1]), 15.0))
                 framed = true
             }
+        }
+    }
+
+    /**
+     * Move the camera to where the phone is now.
+     *
+     * The map frames itself once, on first data, and then deliberately never moves again -- panning
+     * away and having the map yank itself back would be worse than the problem. The cost is that
+     * after looking somewhere else, or after coming home from a trip, the map stays where it was
+     * left and there is no way back to yourself. This is that way back, and it is driven by a tap
+     * rather than by the arrival of a fix, so the map still never moves under the user's hands.
+     *
+     * [framed] is set so the one-shot auto-framing cannot fire afterwards and move the camera
+     * again a moment later.
+     */
+    fun recentre(lat: Double, lng: Double, zoom: Double = 15.5) {
+        val mm = map ?: return
+        framed = true
+        runCatching {
+            mm.animateCamera(CameraUpdateFactory.newLatLngZoom(LatLng(lat, lng), zoom), 550)
         }
     }
 
