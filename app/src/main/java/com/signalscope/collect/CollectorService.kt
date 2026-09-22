@@ -59,6 +59,12 @@ class CollectorService : LifecycleService() {
             }
         }
 
+        // Position fixes used to live in their own database file; they now live in the main one.
+        // This rescues the rows from the old file and must run before the sweep below, which would
+        // otherwise apply the 30-day cut to an empty table while the real history sat unimported
+        // in a file nothing reads any more. Runs once per install and is a no-op thereafter.
+        io.launch { runCatching { com.signalscope.store.MapFixImport.runOnce(this@CollectorService) } }
+
         // Bounded retention, on every start. `data-model.md` §7 promises raw rows are dropped at
         // 30 days; nothing enforced it, so the movement history the two databases jointly hold
         // grew for the life of the install. Cheap (one indexed DELETE per table) and it runs

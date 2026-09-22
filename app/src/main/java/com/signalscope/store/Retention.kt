@@ -291,7 +291,9 @@ object Retention {
         // get one; see the note in Compaction.
         var fixes = 0
         runCatching {
-            val mapDb = MapDb.get(ctx).openHelper.writableDatabase
+            // map_fix now lives in the main database, so this is the same connection the rest of
+            // the sweep uses and the whole retention pass is finally one file's worth of work.
+            val mapDb = Db.get(ctx).openHelper.writableDatabase
             fixes = mapDb.delete(
                 "map_fix", "wallMillis < ?",
                 arrayOf<Any>(nowWall - policy.identityMaxAgeMs)

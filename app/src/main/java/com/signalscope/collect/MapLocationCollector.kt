@@ -11,7 +11,7 @@ import android.os.SystemClock
 import android.util.Log
 import androidx.core.content.ContextCompat
 import com.signalscope.store.MapFix
-import com.signalscope.store.MapDb
+import com.signalscope.store.Db
 import com.signalscope.store.MapHex
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -321,9 +321,9 @@ object MapLocationCollector {
 
         io.launch {
             try {
-                val dao = MapDb.get(ctx).fixes()
-                exit?.let { dao.insert(it) }
-                dao.insert(row)
+                val dao = Db.get(ctx).dao()
+                exit?.let { dao.insertFix(it) }
+                dao.insertFix(row)
             } catch (e: Throwable) { Log.w(TAG, "fix write failed", e) }
         }
     }

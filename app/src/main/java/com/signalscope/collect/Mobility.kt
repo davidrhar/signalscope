@@ -3,7 +3,6 @@ package com.signalscope.collect
 import android.content.Context
 import android.os.SystemClock
 import com.signalscope.store.Db
-import com.signalscope.store.MapDb
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -599,7 +598,7 @@ object Mobility {
             lastFixSpeed = null
             return
         }
-        val fix = runCatching { MapDb.get(ctx).fixes().latest() }.getOrNull() ?: return
+        val fix = runCatching { Db.get(ctx).dao().latestFix() }.getOrNull() ?: return
         lastFixSpeed = fix.speedMps
         lastFixWall = fix.wallMillis
         val s = fix.speedMps

@@ -703,7 +703,7 @@ object MapBinBuilder {
     suspend fun build(ctx: Context): MapModel {
         val t0 = System.currentTimeMillis()
         return try {
-            val fixes = MapDb.get(ctx).fixes().all()
+            val fixes = Db.get(ctx).dao().allFixes()
             val radio = readRadio(ctx)
             val links = runCatching { readLinks(ctx) }.getOrDefault(emptyList())
             // The map must never take the app down, and one missing table must not cost the other

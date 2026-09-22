@@ -60,7 +60,18 @@ data class RadioSample(
     /** `ServiceState.getCellBandwidths()` in kHz, comma-joined ("20000,20000" is two-carrier CA). */
     val cellBandwidths: String? = null,
     /** Probability the device is indoors. Reserved: written null until its signal is integrated. */
-    val indoorProb: Double? = null
+    val indoorProb: Double? = null,
+    /**
+     * The position bin this sample was taken in, where one was known at write time.
+     *
+     * `data-model.md` s3 always specified this as the right home for position, and it has lived in
+     * a separate database instead. Adding the column is the first half of moving it back; nothing
+     * populates it yet, and [MapBinBuilder] still recovers position by joining on time. That join
+     * is the honest one -- it brackets each sample between the fixes around it and declines to
+     * place samples it cannot -- so it is not being replaced by a naive "whatever the last fix
+     * said", which would silently attach hours-old positions to samples during a GPS gap.
+     */
+    val positionBinId: Long? = null
 )
 
 /**
@@ -200,6 +211,24 @@ data class ProbeResult(
 
 @Dao
 interface CollectorDao {
+    // ---- position fixes -------------------------------------------------------------------
+    // Moved here from the separate signalscope-map.db. Two database files with no transactional
+    // relationship between them meant a bin id and the samples behind it could not be written or
+    // swept atomically, which blocks any "these bins have been contributed" bookkeeping.
+    @Insert suspend fun insertFix(f: MapFix)
+
+    @Query("SELECT * FROM map_fix ORDER BY elapsedNanos ASC")
+    suspend fun allFixes(): List<MapFix>
+
+    @Query("SELECT * FROM map_fix ORDER BY elapsedNanos DESC LIMIT 1")
+    suspend fun latestFix(): MapFix?
+
+    @Query("SELECT COUNT(*) FROM map_fix") suspend fun fixCount(): Int
+
+    /** Bulk path for the one-time import out of the old database; ignores anything already there. */
+    @Insert(onConflict = androidx.room.OnConflictStrategy.IGNORE)
+    suspend fun insertFixes(rows: List<MapFix>)
+
     @Insert suspend fun insertProbe(s: ProbeResult)
     @Query("SELECT COUNT(*) FROM probe_result") suspend fun probeCount(): Int
     @Query("SELECT * FROM probe_result WHERE id > :sinceId") suspend fun probesSince(sinceId: Int): List<ProbeResult>
@@ -227,8 +256,8 @@ interface CollectorDao {
 
 @Database(
     entities = [RadioSample::class, RegistrationEvent::class, LinkEvent::class,
-        ProbeResult::class, NeighbourCell::class, InstrumentEvent::class],
-    version = 3,
+        ProbeResult::class, NeighbourCell::class, InstrumentEvent::class, MapFix::class],
+    version = 4,
     exportSchema = false
 )
 abstract class Db : RoomDatabase() {
@@ -291,10 +320,40 @@ abstract class Db : RoomDatabase() {
             }
         }
 
+        /**
+         * Additive, like the two before it: brings position into this database and adds the column
+         * that will eventually carry it per sample.
+         *
+         * The DDL here must match [MapFix] exactly, including the absence of an index. An index
+         * would help `ORDER BY elapsedNanos`, and it is deliberately not added: [MapFix] is still
+         * the entity of the old single-table `MapDb`, which is at version 1 with no migration list
+         * and no destructive fallback, so any change to the entity's schema would make opening the
+         * old file throw -- during the one-time import that exists to rescue its rows. At 8,700
+         * rows the scan costs nothing. The index can come when MapDb is deleted outright.
+         *
+         * This migration does NOT copy the old rows. Room runs migrations inside a transaction and
+         * SQLite refuses ATTACH DATABASE inside one, so the import is an ordinary read-and-insert
+         * after both databases are open -- see [MapFixImport].
+         */
+        internal val MIGRATION_3_4_SQL = listOf(
+            "ALTER TABLE `radio_sample` ADD COLUMN `positionBinId` INTEGER",
+            "CREATE TABLE IF NOT EXISTS `map_fix` (" +
+                "`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                "`elapsedNanos` INTEGER NOT NULL, `wallMillis` INTEGER NOT NULL, " +
+                "`binId` INTEGER NOT NULL, `resolution` INTEGER NOT NULL, " +
+                "`accuracyM` REAL NOT NULL, `speedMps` REAL)"
+        )
+
+        private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_3_4_SQL.forEach { db.execSQL(it) }
+            }
+        }
+
         @Volatile private var inst: Db? = null
         fun get(ctx: Context): Db = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx.applicationContext, Db::class.java, "signalscope.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .build().also { inst = it }
         }
     }
