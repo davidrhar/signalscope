@@ -211,6 +211,17 @@ data class ProbeResult(
 
 @Dao
 interface CollectorDao {
+    // ---- persisted bin aggregates ---------------------------------------------------------
+    @Query("SELECT * FROM bin_agg") suspend fun allBinAgg(): List<BinAgg>
+
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun upsertBinAgg(rows: List<BinAgg>)
+
+    @Query("DELETE FROM bin_agg WHERE lastSeenDay < :cutoffDay")
+    suspend fun sweepBinAgg(cutoffDay: Int): Int
+
+    @Query("SELECT COUNT(*) FROM bin_agg") suspend fun binAggCount(): Int
+
     @Insert suspend fun insertProbe(s: ProbeResult)
     @Query("SELECT COUNT(*) FROM probe_result") suspend fun probeCount(): Int
     @Query("SELECT * FROM probe_result WHERE id > :sinceId") suspend fun probesSince(sinceId: Int): List<ProbeResult>
@@ -238,8 +249,8 @@ interface CollectorDao {
 
 @Database(
     entities = [RadioSample::class, RegistrationEvent::class, LinkEvent::class,
-        ProbeResult::class, NeighbourCell::class, InstrumentEvent::class],
-    version = 5,
+        ProbeResult::class, NeighbourCell::class, InstrumentEvent::class, BinAgg::class],
+    version = 6,
     exportSchema = false
 )
 abstract class Db : RoomDatabase() {
@@ -353,10 +364,36 @@ abstract class Db : RoomDatabase() {
             }
         }
 
+        /**
+         * The map gets a memory again, without position getting one.
+         *
+         * Dropping `map_fix` in 4->5 cost the map its history: fixes live in RAM now and die with
+         * the process. `bin_agg` restores that by keeping the *result* rather than the inputs --
+         * per-bin counters, histograms and shares, unordered, with a last-seen rounded to a whole
+         * day. A trace says where someone was and when; this says what the radio was like in a
+         * place, and cannot be replayed into a journey.
+         *
+         * lastSeenDay is INTEGER days, not millis, and that is the point rather than an economy: a
+         * millisecond last-seen across enough bins reconstructs which bin came last and roughly
+         * when, which is the ordering 4->5 removed.
+         */
+        internal val MIGRATION_5_6_SQL = listOf(
+            "CREATE TABLE IF NOT EXISTS `bin_agg` (" +
+                "`binId` INTEGER NOT NULL, `subId` INTEGER NOT NULL, " +
+                "`blob` TEXT NOT NULL, `lastSeenDay` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`binId`, `subId`))"
+        )
+
+        private val MIGRATION_5_6 = object : androidx.room.migration.Migration(5, 6) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_5_6_SQL.forEach { db.execSQL(it) }
+            }
+        }
+
         @Volatile private var inst: Db? = null
         fun get(ctx: Context): Db = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx.applicationContext, Db::class.java, "signalscope.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
                 .build().also { inst = it }
         }
     }

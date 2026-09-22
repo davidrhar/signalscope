@@ -57,6 +57,25 @@ object FixBuffer {
     @Synchronized
     fun count(): Int = fixes.size
 
+    /**
+     * Remove every fix at or before [throughWall], returning what was removed.
+     *
+     * This is what keeps persisted and live evidence disjoint. [com.signalscope.store.BinAggregator]
+     * builds bins from these fixes and then drops exactly them, so a sample can never be counted
+     * once on disk and again in memory. Draining rather than marking also means an interrupted
+     * flush loses a little history instead of double counting it -- the safe way round.
+     */
+    @Synchronized
+    fun drainThrough(throughWall: Long): List<MapFix> {
+        val taken = ArrayList<MapFix>()
+        while (true) {
+            val head = fixes.firstOrNull() ?: break
+            if (head.wallMillis > throughWall) break
+            taken.add(fixes.removeFirst())
+        }
+        return taken
+    }
+
     @Synchronized
     fun clear() = fixes.clear()
 }

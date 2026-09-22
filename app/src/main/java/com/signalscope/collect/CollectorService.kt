@@ -151,6 +151,9 @@ class CollectorService : LifecycleService() {
         // days each produced a confident wrong answer and each was found by accident; this is the
         // check that stops that being the detection mechanism.
         runCatching { InstrumentHealth.start(this, io) }
+        // Folds the in-memory fixes into persisted per-bin aggregates every few minutes. Runs from
+        // the service, not the Map tab: a user who never opens the map still accumulates one.
+        runCatching { com.signalscope.store.BinAggregator.start(this, io) }
         // Indoor likelihood from satellite signal, listened to only while position is already being
         // requested -- it never turns GNSS on by itself, because GNSS is the costliest radio here.
         runCatching { EnvironmentContext.start(this, io) }
@@ -333,6 +336,7 @@ class CollectorService : LifecycleService() {
         runCatching { BearerWarmth.stop() }
         runCatching { CarrierFaults.stop() }
         runCatching { InstrumentHealth.stop() }
+        runCatching { com.signalscope.store.BinAggregator.stop() }
         runCatching { EnvironmentContext.stop() }
         runCatching { CarrierAggregation.stop() }
         runCatching { ActionTraffic.stop() }

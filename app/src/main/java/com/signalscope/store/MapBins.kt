@@ -480,13 +480,22 @@ object MapBinBuilder {
      * no second writer and no lock contention. Only columns the shipped schema has always had are
      * named, so a migration adding columns elsewhere cannot break this read.
      */
-    private fun readRadio(ctx: Context): List<Radio> {
+    /**
+     * @param sinceWall when set, only samples at or after this wall time.
+     *
+     * The aggregator runs every few minutes and needs a few minutes of rows; without a bound it
+     * would read the entire table -- hundreds of thousands of rows at full retention -- on a timer,
+     * in the background, forever. The interactive build still reads everything, because it has to
+     * place whatever the fix buffer covers and the user is looking at the result.
+     */
+    private fun readRadio(ctx: Context, sinceWall: Long? = null): List<Radio> {
         val db = Db.get(ctx).openHelper.readableDatabase
         val out = ArrayList<Radio>()
-        db.query(
-            "SELECT elapsedNanos, wallMillis, subId, rat, servingCi, servingPci, bandNum, " +
-                "mcc, mnc, rsrp, rssnr FROM radio_sample ORDER BY elapsedNanos ASC"
-        ).use { c ->
+        val sql = "SELECT elapsedNanos, wallMillis, subId, rat, servingCi, servingPci, bandNum, " +
+            "mcc, mnc, rsrp, rssnr FROM radio_sample" +
+            (if (sinceWall != null) " WHERE wallMillis >= $sinceWall" else "") +
+            " ORDER BY elapsedNanos ASC"
+        db.query(sql).use { c ->
             while (c.moveToNext()) {
                 val mcc = if (c.isNull(7)) "" else c.getString(7)
                 val mnc = if (c.isNull(8)) "" else c.getString(8)
@@ -672,6 +681,30 @@ object MapBinBuilder {
      * taken have no bin and are reported as *unlocated*, in rows and in time, rather than quietly
      * dropped. When `positionBinId` lands, this whole join goes away.
      */
+    /**
+     * Merge two views of the same place into one.
+     *
+     * [combine] already does exactly this for rolling children into a parent; handing it the bin's
+     * own id and resolution merges a bin restored from disk with the live one instead. Exposed so
+     * [BinAggregator] does not reimplement a merge that has to stay identical to the builder's.
+     */
+    fun combineSame(views: List<Bin>): Bin =
+        if (views.size == 1) views.first()
+        else combine(views, views.first().id, views.first().res, "restored+live")
+
+    /** Leaf bins for one explicit set of fixes, without touching what is persisted. */
+    suspend fun binsFrom(ctx: Context, fixes: List<MapFix>): List<Bin> = runCatching {
+        if (fixes.isEmpty()) return emptyList()
+        // A minute either side of the fixes being consumed. The locator brackets a sample between
+        // the fixes around it, so a sample just outside the span can still be placed by the fix at
+        // its edge; reading exactly the span would drop those.
+        val since = fixes.minOf { it.wallMillis } - 60_000L
+        val radio = readRadio(ctx, since)
+        val links = runCatching { readLinks(ctx) }.getOrDefault(emptyList())
+        val probes = runCatching { MapProbeJoin.read(ctx) }.getOrDefault(emptyList())
+        buildFrom(fixes, radio, links, probes, System.currentTimeMillis()).bins
+    }.getOrDefault(emptyList())
+
     suspend fun build(ctx: Context): MapModel {
         val t0 = System.currentTimeMillis()
         return try {
@@ -682,10 +715,58 @@ object MapBinBuilder {
             // two their bins: a device that upgraded before probe_result existed still has radio
             // samples worth binning. So this read fails to an empty list, not to an empty map.
             val probes = runCatching { MapProbeJoin.read(ctx) }.getOrDefault(emptyList())
-            buildFrom(fixes, radio, links, probes, t0)
+            val live = buildFrom(fixes, radio, links, probes, t0)
+            // Everything already folded to disk, merged back in. The two sets are disjoint --
+            // BinAggregator drains the fixes it consumes -- so this adds history rather than
+            // double counting it.
+            val stored = runCatching {
+                Db.get(ctx).dao().allBinAgg().mapNotNull { BinCodec.decode(it.blob) }
+            }.getOrDefault(emptyList())
+            if (stored.isEmpty()) live else withStored(live, stored, t0)
         } catch (e: Throwable) {
             MapModel.empty(e.message ?: e.javaClass.simpleName)
         }
+    }
+
+    /**
+     * Fold what is on disk into what was just built.
+     *
+     * The two sets are disjoint -- [BinAggregator] drains the fixes it consumes -- so bins sharing
+     * an id are two views of one place and merge exactly, and bins appearing in only one pass
+     * through untouched.
+     *
+     * [mergeWalk] is deliberately NOT re-run here. It rolls children into parents against
+     * thresholds, and applying it again to output it has already produced would let a bin's
+     * resolution drift coarser on every rebuild -- a map that quietly loses detail the longer it
+     * runs. Stored and live bins therefore keep whatever resolution each was published at, and a
+     * parent and child can briefly overlap until the next flush puts them in the same pass. Small,
+     * transient, and visible, which is the right way round for this to be wrong.
+     */
+    private fun withStored(live: MapModel, stored: List<Bin>, t0: Long): MapModel {
+        val merged = (live.bins + stored)
+            .groupBy { it.id to it.subId }
+            .map { (_, views) -> combineSame(views) }
+
+        val resCounts = merged.groupingBy { it.res }.eachCount()
+        val clsCounts = merged.groupingBy { it.cls }.eachCount()
+        val surveyed = merged.filter { it.cls != 0 }
+        val bad = surveyed.filter { it.cls == 1 }
+
+        return live.copy(
+            bins = merged.sortedByDescending { it.nObs },
+            geoJson = geoJson(merged),
+            buildMs = System.currentTimeMillis() - t0,
+            resCounts = resCounts,
+            clsCounts = clsCounts,
+            contrast = Contrast(
+                surveyed = surveyed.size,
+                thin = clsCounts[0] ?: 0,
+                bad = bad.size,
+                badFullBars = bad.count { carrierBars(it.rsrpP50) >= 4 },
+                badWeak = bad.count { (it.rsrpP50 ?: 0) < -108 },
+                medianBadRsrp = pooledPercentile(bad, 0.5) { it.rsrpHist }
+            )
+        )
     }
 
     private fun buildFrom(
