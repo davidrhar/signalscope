@@ -211,24 +211,6 @@ data class ProbeResult(
 
 @Dao
 interface CollectorDao {
-    // ---- position fixes -------------------------------------------------------------------
-    // Moved here from the separate signalscope-map.db. Two database files with no transactional
-    // relationship between them meant a bin id and the samples behind it could not be written or
-    // swept atomically, which blocks any "these bins have been contributed" bookkeeping.
-    @Insert suspend fun insertFix(f: MapFix)
-
-    @Query("SELECT * FROM map_fix ORDER BY elapsedNanos ASC")
-    suspend fun allFixes(): List<MapFix>
-
-    @Query("SELECT * FROM map_fix ORDER BY elapsedNanos DESC LIMIT 1")
-    suspend fun latestFix(): MapFix?
-
-    @Query("SELECT COUNT(*) FROM map_fix") suspend fun fixCount(): Int
-
-    /** Bulk path for the one-time import out of the old database; ignores anything already there. */
-    @Insert(onConflict = androidx.room.OnConflictStrategy.IGNORE)
-    suspend fun insertFixes(rows: List<MapFix>)
-
     @Insert suspend fun insertProbe(s: ProbeResult)
     @Query("SELECT COUNT(*) FROM probe_result") suspend fun probeCount(): Int
     @Query("SELECT * FROM probe_result WHERE id > :sinceId") suspend fun probesSince(sinceId: Int): List<ProbeResult>
@@ -256,8 +238,8 @@ interface CollectorDao {
 
 @Database(
     entities = [RadioSample::class, RegistrationEvent::class, LinkEvent::class,
-        ProbeResult::class, NeighbourCell::class, InstrumentEvent::class, MapFix::class],
-    version = 4,
+        ProbeResult::class, NeighbourCell::class, InstrumentEvent::class],
+    version = 5,
     exportSchema = false
 )
 abstract class Db : RoomDatabase() {
@@ -324,16 +306,10 @@ abstract class Db : RoomDatabase() {
          * Additive, like the two before it: brings position into this database and adds the column
          * that will eventually carry it per sample.
          *
-         * The DDL here must match [MapFix] exactly, including the absence of an index. An index
-         * would help `ORDER BY elapsedNanos`, and it is deliberately not added: [MapFix] is still
-         * the entity of the old single-table `MapDb`, which is at version 1 with no migration list
-         * and no destructive fallback, so any change to the entity's schema would make opening the
-         * old file throw -- during the one-time import that exists to rescue its rows. At 8,700
-         * rows the scan costs nothing. The index can come when MapDb is deleted outright.
-         *
-         * This migration does NOT copy the old rows. Room runs migrations inside a transaction and
-         * SQLite refuses ATTACH DATABASE inside one, so the import is an ordinary read-and-insert
-         * after both databases are open -- see [MapFixImport].
+         * Superseded one migration later by 4->5, which drops `map_fix` again: position stopped
+         * being stored at all rather than being stored in a better place. Kept as written because a
+         * migration that has run on a device is history, not a draft -- rewriting it to match what
+         * the schema eventually became would make the chain lie about what those devices did.
          */
         internal val MIGRATION_3_4_SQL = listOf(
             "ALTER TABLE `radio_sample` ADD COLUMN `positionBinId` INTEGER",
@@ -350,10 +326,37 @@ abstract class Db : RoomDatabase() {
             }
         }
 
+        /**
+         * Position stops being stored at all.
+         *
+         * `map_fix` was an ordered, timestamped sequence of bins as fine as ~65 m -- a movement
+         * history, whatever it was called, and the one piece of collected data that could identify
+         * where its owner lives. Nothing in the diagnosis used it: band, RSRP, RSRQ, SINR, serving
+         * cell and neighbours all come from `radio_sample`, and serving-cell identity needs no
+         * location permission at all. Position only ever put those numbers on a map, and a map can
+         * be drawn from a buffer in memory.
+         *
+         * So the table is dropped rather than swept, and the rows in it go with it. This is the
+         * one migration in the project that destroys collected data, and it does that deliberately:
+         * leaving the history in place while claiming not to store position would be worse than
+         * either choice made honestly.
+         *
+         * `positionBinId` on radio_sample stays. It is nullable, nothing writes it, and it costs a
+         * byte a row -- and stamping a bin onto a timestamped sample would rebuild exactly the
+         * trace this removes, so it stays empty until there is an aggregated home for it.
+         */
+        internal val MIGRATION_4_5_SQL = listOf("DROP TABLE IF EXISTS `map_fix`")
+
+        private val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_4_5_SQL.forEach { db.execSQL(it) }
+            }
+        }
+
         @Volatile private var inst: Db? = null
         fun get(ctx: Context): Db = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx.applicationContext, Db::class.java, "signalscope.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .build().also { inst = it }
         }
     }

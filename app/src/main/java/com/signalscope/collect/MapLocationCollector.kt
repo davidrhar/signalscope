@@ -319,12 +319,8 @@ object MapLocationCollector {
         lastWriteMs = fixMs
         lastWrittenBin = bin
 
-        io.launch {
-            try {
-                val dao = Db.get(ctx).dao()
-                exit?.let { dao.insertFix(it) }
-                dao.insertFix(row)
-            } catch (e: Throwable) { Log.w(TAG, "fix write failed", e) }
-        }
+        // Into memory, never onto disk. See [FixBuffer] for why, and for what it costs.
+        exit?.let { FixBuffer.add(it) }
+        FixBuffer.add(row)
     }
 }

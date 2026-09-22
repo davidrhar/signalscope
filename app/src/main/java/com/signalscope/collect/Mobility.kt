@@ -598,7 +598,7 @@ object Mobility {
             lastFixSpeed = null
             return
         }
-        val fix = runCatching { Db.get(ctx).dao().latestFix() }.getOrNull() ?: return
+        val fix = runCatching { FixBuffer.latest() }.getOrNull() ?: return
         lastFixSpeed = fix.speedMps
         lastFixWall = fix.wallMillis
         val s = fix.speedMps

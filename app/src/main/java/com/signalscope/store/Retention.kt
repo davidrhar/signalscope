@@ -289,16 +289,9 @@ object Retention {
         // identity line exactly as before. A roll-up of a position is still a position, so giving
         // `map_fix` a tier would have been the one change here that widened something. It does not
         // get one; see the note in Compaction.
-        var fixes = 0
-        runCatching {
-            // map_fix now lives in the main database, so this is the same connection the rest of
-            // the sweep uses and the whole retention pass is finally one file's worth of work.
-            val mapDb = Db.get(ctx).openHelper.writableDatabase
-            fixes = mapDb.delete(
-                "map_fix", "wallMillis < ?",
-                arrayOf<Any>(nowWall - policy.identityMaxAgeMs)
-            )
-        }
+        // Position is no longer stored anywhere, so there is nothing here to sweep. The
+        // fixes the map draws from live in FixBuffer and die with the process.
+        val fixes = 0
 
         // ---- pass 3b: neighbour cells. Raw only, no roll-up: a neighbour reading is PCI and
         // ARFCN relative to where the observer stood (data-model.md s3), and a histogram of PCIs

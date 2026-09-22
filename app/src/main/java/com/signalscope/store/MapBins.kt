@@ -26,9 +26,8 @@ import kotlin.math.sqrt
  * agent this phase. The right home is `radio_sample.positionBinId` as the schema specifies; see
  * the note on [MapBinBuilder.build] for what the split costs.
  */
-@Entity(tableName = "map_fix")
 data class MapFix(
-    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val id: Long = 0,
     /**
      * When the position was *measured*, on the `elapsedRealtimeNanos` clock — the join key, per
      * `data-model.md` §2. Rows written before 2026-09-13 carry the time the fix was *delivered*
@@ -42,33 +41,6 @@ data class MapFix(
     val accuracyM: Float,
     val speedMps: Float?
 )
-
-@Dao
-interface MapFixDao {
-    @Insert suspend fun insert(f: MapFix)
-
-    @Query("SELECT * FROM map_fix ORDER BY elapsedNanos ASC")
-    suspend fun all(): List<MapFix>
-
-    @Query("SELECT * FROM map_fix ORDER BY elapsedNanos DESC LIMIT 1")
-    suspend fun latest(): MapFix?
-
-    @Query("SELECT COUNT(*) FROM map_fix") suspend fun count(): Int
-}
-
-@Database(entities = [MapFix::class], version = 1, exportSchema = false)
-abstract class MapDb : RoomDatabase() {
-    abstract fun fixes(): MapFixDao
-
-    companion object {
-        @Volatile private var inst: MapDb? = null
-        fun get(ctx: Context): MapDb = inst ?: synchronized(this) {
-            inst ?: Room.databaseBuilder(
-                ctx.applicationContext, MapDb::class.java, "signalscope-map.db"
-            ).build().also { inst = it }
-        }
-    }
-}
 
 // =====================================================================================
 //  Outcome classes, causes, colours — coverage-map.md §1
@@ -703,7 +675,7 @@ object MapBinBuilder {
     suspend fun build(ctx: Context): MapModel {
         val t0 = System.currentTimeMillis()
         return try {
-            val fixes = Db.get(ctx).dao().allFixes()
+            val fixes = com.signalscope.collect.FixBuffer.all()
             val radio = readRadio(ctx)
             val links = runCatching { readLinks(ctx) }.getOrDefault(emptyList())
             // The map must never take the app down, and one missing table must not cost the other
