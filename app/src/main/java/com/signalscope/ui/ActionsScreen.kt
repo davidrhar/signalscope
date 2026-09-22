@@ -119,6 +119,8 @@ fun ActionsScreen(modifier: Modifier = Modifier) {
             )
         }
 
+        YourDataPanel()
+
         SecHead("Settings deep links", "tier 0 · these work")
         Text(
             "We cannot set any of these. We can put you one tap from the right page with the " +

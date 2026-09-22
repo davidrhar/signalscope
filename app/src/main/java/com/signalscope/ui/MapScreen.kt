@@ -1122,9 +1122,27 @@ private fun Legend(m: MapModel, layer: MapLayer, onClose: () -> Unit) {
                 )
             }
             MapLayer.BAND -> {
+                // Every other layer here lists fixed rows, so it always says something. This one is
+                // built entirely from the data, and with no surveyed bins it used to render an
+                // empty box under a heading -- which reads as a broken panel rather than as an
+                // honest "nothing measured yet", and is exactly the failure this project keeps
+                // writing rules against.
                 val bands = m.bins.filter { it.cls != 0 }.groupingBy { it.band }.eachCount()
-                bands.forEach { (b, n) ->
-                    LegendRow(MapBinBuilder.bandColour(b), b ?: "band unknown", "$n")
+                    .entries.sortedByDescending { it.value }
+                if (bands.isEmpty()) {
+                    val thin = m.bins.count { it.cls == 0 }
+                    Text(
+                        if (thin > 0)
+                            "No band to show yet. $thin bin${if (thin == 1) "" else "s"} " +
+                                "measured so far, none with enough readings to stand for a place."
+                        else "No bands measured yet. Bins appear once position is running and the " +
+                            "radio has been sampled in one place for a while.",
+                        color = T.Faint, fontSize = 9.sp, lineHeight = 12.sp
+                    )
+                } else {
+                    bands.forEach { (b, n) ->
+                        LegendRow(MapBinBuilder.bandColour(b), b ?: "band unknown", "$n")
+                    }
                 }
             }
             MapLayer.ANCHOR -> {

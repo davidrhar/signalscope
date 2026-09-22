@@ -71,6 +71,29 @@ private fun Root() {
         ActivityResultContracts.RequestMultiplePermissions()
     ) { CollectorService.start(ctx) }
 
+    // Nothing is recorded, and no permission is even asked for, until this has been accepted once.
+    // Asking for phone and location first and explaining afterwards is the ordering that makes a
+    // consent screen decorative.
+    var consented by remember { mutableStateOf(Consent.accepted(ctx)) }
+
+    if (!consented) {
+        ConsentScreen(
+            onAccept = {
+                Consent.accept(ctx)
+                consented = true
+                perms.launch(
+                    arrayOf(
+                        Manifest.permission.READ_PHONE_STATE,
+                        Manifest.permission.ACCESS_FINE_LOCATION,
+                        Manifest.permission.POST_NOTIFICATIONS
+                    )
+                )
+            },
+            onDecline = { Consent.uninstall(ctx) }
+        )
+        return
+    }
+
     LaunchedEffect(Unit) {
         perms.launch(
             arrayOf(

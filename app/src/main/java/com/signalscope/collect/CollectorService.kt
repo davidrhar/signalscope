@@ -208,7 +208,20 @@ class CollectorService : LifecycleService() {
                 // WEAK because 16 changes a minute has been recorded walking. A journey is
                 // exactly when position is worth its power.
                 val moving = runCatching { Mobility.state.value.aboveWalking }.getOrDefault(false)
-                val want = (onCellular || excursionOpen || moving) &&
+
+                // Stationary on Wi-Fi used to mean no position, which was right when a fix became
+                // a row in a table: spending power to lengthen a stored movement history nobody
+                // asked for. Fixes are transient now -- used to place a reading, then dropped with
+                // the process -- so the only remaining cost is battery, and the cost of the gate
+                // is a map that stays empty at home, which is where most measuring happens.
+                //
+                // Still gated on the screen being on. A phone in a pocket is not somewhere its
+                // owner is looking at a map, and that is the case worth not paying for.
+                val screenOn = runCatching {
+                    getSystemService(android.os.PowerManager::class.java)?.isInteractive == true
+                }.getOrDefault(false)
+
+                val want = (onCellular || excursionOpen || moving || screenOn) &&
                     !starved &&
                     MapLocationCollector.hasPermission(this@CollectorService)
 

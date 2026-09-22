@@ -35,7 +35,10 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val action = intent?.action ?: return
         if (action != Intent.ACTION_BOOT_COMPLETED && action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        // Consent as well as the collect toggle. An install that was never accepted has no
+        // business starting itself at boot, and the toggle alone would let one.
         if (!CollectorService.userEnabled(context)) return
+        if (!com.signalscope.ui.Consent.accepted(context)) return
         runCatching { CollectorService.start(context) }
     }
 }
