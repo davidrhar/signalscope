@@ -12,6 +12,8 @@ release/
 *.aab
 *.keystore
 *.jks
+# The signing passwords. keystore.properties.template is the committed shape of this file.
+keystore.properties
 .DS_Store
 /captures/
 *.pcap

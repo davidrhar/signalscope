@@ -4,23 +4,32 @@ An Android app for diagnosing *why* mobile data drops — not just showing that 
 
 > **⚠️ Research build — not ready for general use.**
 >
-> SignalScope is a single-developer research instrument, not a finished app. It does collect your
-> own diagnostics and keeps them on your phone — nothing is uploaded anywhere — but please be aware
-> before installing:
+> SignalScope is a single-developer research instrument, not a finished app. Everything it collects
+> stays on your phone: **nothing is uploaded anywhere.** Before installing, please be aware:
 >
-> - **Updating erases your data.** Each published APK is signed with a different, throwaway key,
->   so Android will not install one over another. Updating means uninstalling, which deletes
->   everything collected.
-> - **It is a debug build.** Anyone with USB-debugging access to your unlocked phone can read the
->   collected data, which includes coarse location cells and the mobile masts you connected to.
+> - **What it records is movement data, and calling it anything softer would be wrong.** The app
+>   never stores a latitude or longitude — every position is rounded to a hexagonal cell before it
+>   is written. But it keeps a *timestamped history* of those cells, and the finest of them is about
+>   65 m across, which over a residential street is enough to identify a home. Separately, and
+>   **whether or not you ever grant location permission**, it records which mobile mast served you
+>   at each moment — which is a movement history in its own right. Binning reduces the resolution.
+>   It does not make the data anonymous. Treat the database as sensitive personal information.
 > - **Collection may stop in the background.** The app does not yet ask to be exempted from battery
 >   optimisation, so many phones will put it to sleep and the data will have gaps.
-> - **It runs experiments automatically.** It can hold the mobile radio awake for battery-cost
->   experiments and runs small connection and speed tests, which use some battery and up to about
->   1 MB of mobile data a day.
+> - **It runs small tests automatically.** It can hold the mobile radio awake, and runs connection
+>   and speed tests that use some battery and up to about 1 MB of mobile data a day. These are not
+>   yet opt-in.
+> - **Debug builds are readable over USB.** Anyone with USB-debugging access to your unlocked phone
+>   can read everything collected. Release builds close that particular door; the data is still on
+>   your phone either way.
 >
-> A build intended for other people — permanent signing, a release build, a battery-exemption prompt
-> and experiments that are opt-in — has not been made yet.
+> **Updating.** Builds are now signed with a permanent key, so an update keeps your data. The one
+> exception is the move *from* an older debug build — those were each signed with a throwaway key,
+> so the first release build has to be installed fresh, and whatever those builds collected is lost
+> at that point. That happens once. See `docs/release.md`.
+>
+> A build intended for a wider audience — a battery-exemption prompt, opt-in tests, and a consent
+> flow for anything that ever leaves the device — has not been made yet.
 
 Status: **Phase 1 running on hardware.** A debug APK builds, installs and collects live on the
 reference device (a recent Android 16 flagship, DSDS dual-SIM). The docs below are the design;
