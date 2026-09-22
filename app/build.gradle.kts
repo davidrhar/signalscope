@@ -27,6 +27,10 @@ val keystoreProps = Properties().apply {
     if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
 }
 val releaseKeystore = keystoreProps.getProperty("storeFile")
+    // A copied-but-unfilled template leaves this as the empty string, and rootProject.file("")
+    // throws "Cannot convert '' to File" -- failing the build for everyone, including the debug
+    // build that never wanted a key. Absent and blank both mean "no keystore configured".
+    ?.takeIf { it.isNotBlank() }
     ?.let { rootProject.file(it) }
     ?.takeIf { it.exists() }
 

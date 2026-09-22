@@ -145,14 +145,65 @@ object CellProbe {
     }
 
     /**
+     * Length of one arm of the rebuild A/B below. 23 minutes rather than a round number so the
+     * alternation cannot come into phase with anything hourly or half-hourly on the network side.
+     */
+    private const val ARM_PERIOD_MS = 23 * 60_000L
+
+    /**
+     * Does a refused bind trigger a rebuild right now?
+     *
+     * ## The question
+     *
+     * Rebuilding on a refused bind looks obviously right and may be the thing causing the refusals.
+     * [rebuildReservation] is `unregisterNetworkCallback` then `requestNetwork`, and a
+     * `requestNetwork` for TRANSPORT_CELLULAR can ask the modem to bring a *new* connection up
+     * rather than hand back the one already there. Fail, rebuild, get a fresh network, watch it go
+     * away, fail again.
+     *
+     * Ten days of rows are consistent with that: distinct cellular networks seen per day sat around
+     * 20 before the rebuild was moved onto the *first* refusal instead of the second, and 66-82 in
+     * the days straight after. The two calmest days since -- 4 and 15 distinct networks -- are also
+     * the two with fewest refusals, one of them zero across 3,447 probes.
+     *
+     * Consistent with, not evidence of. This is the third attempt at this bug and the previous two
+     * were both called fixed on a few hours of agreeable data, so this one gets measured.
+     *
+     * ## The design
+     *
+     * Arm A rebuilds on failure, arm B does not, alternating every [ARM_PERIOD_MS] on the wall
+     * clock. Interleaving rather than running the arms back to back is the whole point: sequential
+     * arms confound the policy with time of day, location, and whatever the network happened to be
+     * doing that afternoon, which is how this project produced a wrong answer once already.
+     *
+     * Nothing records which arm a probe ran under, because nothing needs to -- the arm is a pure
+     * function of the row's own timestamp, so the split is recoverable from any `probe_result` row
+     * long after the fact:
+     *
+     *     (wallMillis / 1380000) % 2 = 0  ->  arm A, rebuilds on failure
+     *                                = 1  ->  arm B, does not
+     *
+     * A genuinely dead handle is still rebuilt in both arms; that path lives in [liveCellular] and
+     * is not what is under test here.
+     *
+     * **Known weakness.** Churn caused during arm A does not stop at the arm boundary, so a real
+     * effect will measure smaller than it is. That biases towards finding nothing, which is the
+     * safe direction to be biased in: a difference that survives it is worth believing, and a null
+     * result will not settle the question on its own.
+     */
+    private fun rebuildsOnFailureNow(): Boolean =
+        (System.currentTimeMillis() / ARM_PERIOD_MS) % 2L == 0L
+
+    /**
      * A bind was refused. The handle was live when the socket was made -- [liveCellular] checked --
-     * so this is the other measured cause: 854 of the refusals happened on the *current* network,
-     * where the network exists and the app simply no longer holds a request for it. Only a new
-     * request restores that, and waiting for a second failure first just discards another probe.
+     * so this is the other measured cause: the network exists and the app simply no longer holds a
+     * request for it, which only a new request restores.
+     *
+     * Whether that reasoning is right is exactly what [rebuildsOnFailureNow] is measuring.
      */
     private fun noteBindFailure() {
         bindFailStreak++
-        rebuildReservation(REBUILD_FAST_GAP_MS)
+        if (rebuildsOnFailureNow()) rebuildReservation(REBUILD_FAST_GAP_MS)
     }
 
     private fun noteBindSuccess() { bindFailStreak = 0 }
