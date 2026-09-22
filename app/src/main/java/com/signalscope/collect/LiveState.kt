@@ -168,5 +168,16 @@ object LiveState {
         }
     }
 
+    /**
+     * Forget a subscription entirely.
+     *
+     * Used when the placeholder registered before the real subscription list was readable has to
+     * be cleared. Leaving it would put a second, permanently blank SIM beside the real ones on the
+     * Live screen, which reads as a hardware fault rather than as a startup artefact.
+     */
+    fun dropSim(subId: Int) {
+        sims.update { cur -> cur - subId }
+    }
+
     val simsFlow: StateFlow<Map<Int, SimState>> get() = sims
 }

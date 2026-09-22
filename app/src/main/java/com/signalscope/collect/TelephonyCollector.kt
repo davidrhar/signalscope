@@ -42,12 +42,64 @@ class TelephonyCollector(
     /** Samsung and other OEMs append their own bar level to SignalStrength.toString(). */
     private val vendorLevelRe = Regex("""(?:lte|nr|gsm|wcdma)Level=(\d+)""", RegexOption.IGNORE_CASE)
 
+    /**
+     * Re-enumerate when the subscription list becomes readable.
+     *
+     * [start] used to enumerate once and latch whatever it found. On a fresh install that is
+     * routinely nothing -- the permission has not been granted at that instant, or the telephony
+     * stack has not finished coming up -- so it took the fallback branch, registered the default
+     * subscription as "default" in slot -1, and stayed there for the life of the process.
+     *
+     * The symptoms did not look like one bug: the header read "default - SIM 0", the network-type
+     * badge was blank, and the bars panel said "carrier scale unavailable". They are all the same
+     * thing, because carrier configuration and serving state are both looked up per subscription
+     * and the subscription was wrong.
+     *
+     * It never showed up in development because a debug build had been running since before any
+     * permission was granted, and only a fresh install starts from nothing -- which is what every
+     * other person's phone is.
+     */
+    private var subsListener: SubscriptionManager.OnSubscriptionsChangedListener? = null
+
+    private fun watchSubscriptions() {
+        if (subsListener != null) return
+        val manager = sm ?: return
+        val l = object : SubscriptionManager.OnSubscriptionsChangedListener() {
+            override fun onSubscriptionsChanged() {
+                // Fires once on registration and again whenever the list changes, so this is both
+                // the retry for an empty first look and the handler for a SIM being swapped.
+                runCatching { enumerate() }
+            }
+        }
+        subsListener = l
+        runCatching { manager.addOnSubscriptionsChangedListener(exec, l) }
+    }
+
     fun start() {
+        watchSubscriptions()
+        enumerate()
+    }
+
+    private fun enumerate() {
         val subs = try { sm?.activeSubscriptionInfoList.orEmpty() } catch (_: SecurityException) { emptyList() }
         if (subs.isEmpty()) {
-            // No READ_PHONE_STATE yet, or no SIM. Register the default sub so we show something.
-            registerFor(SubscriptionManager.getDefaultSubscriptionId(), -1, "default")
+            // Nothing readable yet. Register the default subscription so the screen shows
+            // something, and leave the listener above to correct it the moment the real list
+            // arrives -- rather than latching this placeholder as the answer.
+            if (callbacks.isEmpty()) {
+                registerFor(SubscriptionManager.getDefaultSubscriptionId(), -1, "default")
+            }
             return
+        }
+
+        // The real list is here. Drop the placeholder registration if one was made, so its stale
+        // "default / slot -1" row does not sit alongside the true subscriptions.
+        val real = subs.map { it.subscriptionId }.toSet()
+        callbacks.keys.filterNot { it in real }.forEach { stale ->
+            callbacks.remove(stale)?.let { cb ->
+                runCatching { tmFor(stale)?.unregisterTelephonyCallback(cb) }
+            }
+            LiveState.dropSim(stale)
         }
         val dataSub = SubscriptionManager.getDefaultDataSubscriptionId()
         subs.forEach { info ->
@@ -67,6 +119,8 @@ class TelephonyCollector(
     }
 
     fun stop() {
+        subsListener?.let { l -> runCatching { sm?.removeOnSubscriptionsChangedListener(l) } }
+        subsListener = null
         stopPolling()
         callbacks.forEach { (subId, cb) ->
             runCatching { tmFor(subId)?.unregisterTelephonyCallback(cb) }
@@ -89,10 +143,14 @@ class TelephonyCollector(
 
     private fun registerFor(subId: Int, slot: Int, carrier: String) {
         val tm = tmFor(subId) ?: return
+        // enumerate() can run many times -- once per subscription-list change -- so the labels are
+        // refreshed every time while the platform callback is registered only once. Registering
+        // twice would double every reading.
+        LiveState.updateSim(subId) { it.copy(slot = slot, carrier = carrier) }
+        if (callbacks.containsKey(subId)) return
         val cb = SubCallback(subId)
         callbacks[subId] = cb
         runCatching { tm.registerTelephonyCallback(exec, cb) }
-        LiveState.updateSim(subId) { it.copy(slot = slot, carrier = carrier) }
     }
 
     /** "00101" -> "001-01". Null for anything that is not a plausible MCC plus MNC. */
