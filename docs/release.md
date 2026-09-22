@@ -37,9 +37,32 @@ no keystore.
 cp keystore.properties.template keystore.properties
 ```
 
-Fill in `storeFile`, `storePassword`, `keyAlias`, `keyPassword`. The file is gitignored. A path
-outside the repository is better than one inside it, so the key survives the working copy being
-deleted.
+Fill in `storeFile` and `keyAlias`. Keep the path outside the repository, so the key survives the
+working copy being deleted.
+
+**Put the password in the keychain, not in that file.**
+
+```bash
+security add-generic-password -a "$USER" -s signalscope-release -w
+```
+
+The build reads it with `security find-generic-password` at configure time, so the password lives
+encrypted behind your login rather than in plaintext on disk, and the first build asks permission
+(choose Always Allow). Override the service name with `keychainService=` if you want a different
+one.
+
+`storePassword`/`keyPassword` in the properties file still work and are used when the keychain has
+nothing, so CI and other machines are not blocked — but leave them blank when the keychain entry
+exists. Both passwords always resolve from **one** source: a keychain store password combined with
+a stale file key password opens the keystore and then fails inside keytool with *"Get Key failed:
+Given final block not properly padded"*, which reads like a corrupt keystore rather than a
+configuration mistake.
+
+Check what resolved, without printing any secret:
+
+```bash
+./gradlew signingStatus
+```
 
 Without `keystore.properties` the release build still compiles — it just comes out unsigned. A
 fresh clone, another machine and CI must never need the private key in order to build.
@@ -61,7 +84,8 @@ The SHA-256 of the certificate is the app's identity. Record it here the first t
 later build still matches — a build that comes out with a different fingerprint is a build nobody
 can install over the last one.
 
-Certificate SHA-256: _(fill in after the first signed build)_
+Certificate SHA-256: `f1ef2ce025b1f8f5f8515633257eb5f622557c27264e4434405621dee56fd707`
+(RSA 4096, recorded 2026-09-22 from the first signed build, versionCode 2)
 
 ## 4. Version discipline
 

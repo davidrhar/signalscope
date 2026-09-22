@@ -1,4 +1,5 @@
 import java.util.Properties
+import java.util.concurrent.TimeUnit
 
 plugins {
     id("com.android.application")
@@ -26,6 +27,34 @@ val keystorePropsFile = rootProject.file("keystore.properties")
 val keystoreProps = Properties().apply {
     if (keystorePropsFile.exists()) keystorePropsFile.inputStream().use { load(it) }
 }
+
+/**
+ * Read one secret out of the macOS login keychain, or null if it is not there.
+ *
+ * Preferred over keystore.properties because a password in a properties file is plaintext at rest:
+ * it survives the two mistakes that actually kill a project -- committing the key and losing it --
+ * but not anything able to read the home directory. In the keychain it is encrypted, guarded by
+ * the login password, and the first build prompts for release (choose Always Allow).
+ *
+ * Deliberately quiet. Absent entry, no `security` binary, not macOS, a prompt nobody answers: all
+ * of them return null and hand over to the properties file, because a signing setup that fails the
+ * build on a machine that never wanted a key is worse than one that falls back. The timeout is
+ * there for the unanswered-prompt case, which otherwise hangs the build indefinitely.
+ *
+ * The value is never logged. `signingStatus` reports which source won and nothing else.
+ */
+fun keychainPassword(service: String): String? = runCatching {
+    if (!System.getProperty("os.name").startsWith("Mac")) return@runCatching null
+    val proc = ProcessBuilder("security", "find-generic-password", "-s", service, "-w")
+        .redirectErrorStream(false)
+        .start()
+    if (!proc.waitFor(15, TimeUnit.SECONDS)) {
+        proc.destroyForcibly(); return@runCatching null
+    }
+    if (proc.exitValue() != 0) return@runCatching null
+    proc.inputStream.bufferedReader().readText().trim().takeIf { it.isNotEmpty() }
+}.getOrNull()
+
 val releaseKeystore = keystoreProps.getProperty("storeFile")
     // A copied-but-unfilled template leaves this as the empty string, and rootProject.file("")
     // throws "Cannot convert '' to File" -- failing the build for everyone, including the debug
@@ -33,6 +62,46 @@ val releaseKeystore = keystoreProps.getProperty("storeFile")
     ?.takeIf { it.isNotBlank() }
     ?.let { rootProject.file(it) }
     ?.takeIf { it.exists() }
+
+val keychainService = keystoreProps.getProperty("keychainService")
+    ?.takeIf { it.isNotBlank() } ?: "signalscope-release"
+
+val keychainStorePassword = keychainPassword(keychainService)
+val fileStorePassword = keystoreProps.getProperty("storePassword")?.takeIf { it.isNotBlank() }
+val fileKeyPassword = keystoreProps.getProperty("keyPassword")?.takeIf { it.isNotBlank() }
+
+// Both passwords come from ONE source, never a mixture. Taking the store password from the
+// keychain and the key password from a stale properties file gets far enough to open the keystore
+// and then dies inside keytool with "Get Key failed: Given final block not properly padded" --
+// which reads like a corrupt keystore rather than the configuration mistake it is.
+//
+// A PKCS12 keystore, which is what `keytool -storetype PKCS12` produces, uses one password for
+// both. That is why the keychain branch carries a single secret; a keystore that genuinely has a
+// separate key password has to use the properties file for both.
+val resolved = if (keychainStorePassword != null) {
+    Triple(keychainStorePassword, keychainStorePassword,
+        "macOS keychain (service \"$keychainService\")")
+} else {
+    Triple(fileStorePassword, fileKeyPassword ?: fileStorePassword,
+        if (fileStorePassword != null) "keystore.properties (plaintext on disk)" else "none found")
+}
+val resolvedStorePassword = resolved.first
+val resolvedKeyPassword = resolved.second
+val passwordSource = resolved.third
+
+/** Where the signing inputs resolved from, with no secret in the output. */
+tasks.register("signingStatus") {
+    group = "verification"
+    description = "Report how release signing resolves, without printing any secret."
+    doLast {
+        println("keystore file    : " + (releaseKeystore?.absolutePath ?: "not configured"))
+        println("key alias        : " + (keystoreProps.getProperty("keyAlias") ?: "not set"))
+        println("password source  : $passwordSource")
+        println("release signing  : " +
+            if (releaseKeystore != null && resolvedStorePassword != null) "CONFIGURED"
+            else "NOT configured - assembleRelease will produce an unsigned APK")
+    }
+}
 
 android {
     namespace = "com.signalscope"
@@ -54,12 +123,14 @@ android {
     }
 
     signingConfigs {
-        if (releaseKeystore != null) {
+        // Both, or nothing. A keystore with no password produces a confusing mid-build keytool
+        // failure; no signing config at all produces an unsigned APK and a clear signingStatus.
+        if (releaseKeystore != null && resolvedStorePassword != null) {
             create("release") {
                 storeFile = releaseKeystore
-                storePassword = keystoreProps.getProperty("storePassword")
+                storePassword = resolvedStorePassword
                 keyAlias = keystoreProps.getProperty("keyAlias")
-                keyPassword = keystoreProps.getProperty("keyPassword")
+                keyPassword = resolvedKeyPassword
             }
         }
     }
