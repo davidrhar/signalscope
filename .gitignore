@@ -46,3 +46,6 @@ private/
 # Worker build state and local wrangler config. The source is committed; the account is not.
 server/node_modules/
 server/.wrangler/
+
+# Play review video: kept locally, too large for the repository.
+art/play-store/*.mp4
