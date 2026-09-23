@@ -32,6 +32,7 @@ import com.signalscope.store.Bin
 import com.signalscope.store.CAUSES
 import com.signalscope.store.MapBinBuilder
 import com.signalscope.store.Networks
+import com.signalscope.store.SharedMap
 import com.signalscope.store.MapHex
 import com.signalscope.store.MapModel
 import com.signalscope.store.MapProbeJoin
@@ -97,6 +98,10 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var basemap by remember { mutableStateOf(true) }
     /** PLMN to show alone, or null for every network. */
     var onlyNetwork by remember { mutableStateOf<String?>(null) }
+    /** Everyone else's measurements, off until asked for. */
+    var crowdOn by remember { mutableStateOf(false) }
+    var crowd by remember { mutableStateOf<SharedMap.Snapshot?>(null) }
+    var crowdBusy by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Bin?>(null) }
     var legendOpen by remember { mutableStateOf(false) }
     var tilesRendered by remember { mutableStateOf<Boolean?>(null) }
@@ -212,6 +217,18 @@ fun MapScreen(modifier: Modifier = Modifier) {
     LaunchedEffect(model) { model?.let { mapState.setData(it) } }
     LaunchedEffect(layer, model) { mapState.setLayer(layer.key) }
     LaunchedEffect(onlyNetwork, model) { mapState.setNetwork(onlyNetwork) }
+
+    // Cache first so the layer is populated before the network answers, then refresh. A failed
+    // refresh leaves the cached copy drawn and labelled with its age rather than blanking the
+    // layer -- "as of yesterday" beats "nothing", and blanking on a timeout would read as
+    // "nobody has measured anything" when the truth is that one request did not come back.
+    LaunchedEffect(crowdOn) {
+        if (!crowdOn) { mapState.setCrowd(null); return@LaunchedEffect }
+        crowdBusy = true
+        SharedMap.cached(ctx)?.let { crowd = it; mapState.setCrowd(SharedMap.geoJson(it.cells)) }
+        SharedMap.fetch(ctx)?.let { crowd = it; mapState.setCrowd(SharedMap.geoJson(it.cells)) }
+        crowdBusy = false
+    }
     LaunchedEffect(basemap) { mapState.setBasemap(basemap) }
     LaunchedEffect(selected) { mapState.setSelection(selected?.id) }
     LaunchedEffect(fix.binId) { mapState.setHere(fix.binId) }
@@ -276,6 +293,14 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 }
                 Chip(if (basemap) "Basemap" else "No basemap", !basemap) { basemap = !basemap }
                 Chip(regionChipLabel(regions), regionsOpen) { regionsOpen = !regionsOpen }
+                Chip(
+                    when {
+                        crowdBusy -> "Shared…"
+                        crowdOn -> "Shared · ${crowd?.cells?.size ?: 0}"
+                        else -> "Shared map"
+                    },
+                    crowdOn
+                ) { crowdOn = !crowdOn }
             }
             if (networks.size > 1) {
                 Row(
@@ -369,6 +394,8 @@ private class MapHolder {
     var style: Style? = null
     private var pending: MapModel? = null
     private var pendingNetwork: String? = null
+    /** Crowd GeoJSON held until a style exists to put it in, like the other pending state. */
+    private var pendingCrowd: String? = null
     private var pendingLayer = "quality"
     private var pendingSel: Long? = null
     private var pendingHere: Long? = null
@@ -424,7 +451,7 @@ private class MapHolder {
 
             s.addSource(GeoJsonSource(SRC, EMPTY_FC))
             s.addSource(GeoJsonSource(SRC_HERE, EMPTY_FC))
-
+            s.addSource(GeoJsonSource(SRC_CROWD, pendingCrowd ?: EMPTY_FC))
             val fill = FillLayer("bins-fill", SRC).withProperties(
                 PropertyFactory.fillColor(Expression.get("c_quality")),
                 PropertyFactory.fillOpacity(Expression.get("o_quality")),
@@ -454,6 +481,19 @@ private class MapHolder {
                 PropertyFactory.lineColor("#e9edf4"),
                 PropertyFactory.lineWidth(2.4f)
             ).withFilter(Expression.eq(Expression.get("id"), Expression.literal("")))
+            // Everyone else's measurements, added BELOW the local bins so your own always win
+            // the overlap. The id keeps the `bins-` prefix or setBasemap() would hide it along
+            // with the basemap, which is the trap that already caught one layer here.
+            val crowdFill = FillLayer("bins-crowd-fill", SRC_CROWD).withProperties(
+                PropertyFactory.fillColor(Expression.get("colour")),
+                PropertyFactory.fillOpacity(0.34f)
+            )
+            val crowdLine = LineLayer("bins-crowd-line", SRC_CROWD).withProperties(
+                PropertyFactory.lineColor(Expression.get("colour")),
+                PropertyFactory.lineOpacity(0.5f),
+                PropertyFactory.lineWidth(1.0f)
+            )
+
             val here = LineLayer("here-line", SRC_HERE).withProperties(
                 PropertyFactory.lineColor("#4da3ff"),
                 PropertyFactory.lineWidth(2.0f),
@@ -472,15 +512,24 @@ private class MapHolder {
             // only glyph range in the APK -- a closed set of ten characters, so it would not
             // reintroduce the half-labelled-world problem that ruled glyphs out for place names.
 
-            for (l in listOf(fill, line, lie, sel, here)) s.addLayerAt(l, insertAt++)
+            // Crowd first, so it sits underneath: your own measurements must never be
+            // obscured by other people's, and an overlap should read as yours.
+            for (l in listOf(crowdFill, crowdLine, fill, line, lie, sel, here)) s.addLayerAt(l, insertAt++)
 
             pending?.let { setData(it) }
+            pendingCrowd?.let { setCrowd(it) }
             setLayer(pendingLayer)
             setNetwork(pendingNetwork)
             setSelection(pendingSel)
             setHere(pendingHere)
             setBasemap(basemapOn)
         }
+    }
+
+    /** Draw the shared map, or clear it when [geoJson] is null. */
+    fun setCrowd(geoJson: String?) {
+        pendingCrowd = geoJson
+        style?.getSourceAs<GeoJsonSource>(SRC_CROWD)?.setGeoJson(geoJson ?: EMPTY_FC)
     }
 
     fun setData(m: MapModel) {
@@ -621,6 +670,7 @@ private class MapHolder {
     companion object {
         const val SRC = "bins"
         const val SRC_HERE = "here"
+        const val SRC_CROWD = "crowd"
         const val EMPTY_FC = """{"type":"FeatureCollection","features":[]}"""
     }
 }
