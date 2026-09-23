@@ -21,6 +21,8 @@ import androidx.compose.ui.unit.sp
 import com.signalscope.store.Contribution
 import com.signalscope.store.Export
 import com.signalscope.store.Networks
+import com.signalscope.store.ShareConsent
+import com.signalscope.store.Uploader
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -60,6 +62,10 @@ fun ContributePanel() {
     var preview by remember { mutableStateOf<String?>(null) }
     var note by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var sharing by remember { mutableStateOf(ShareConsent.enabled(ctx)) }
+    var lastUpload by remember { mutableStateOf(ShareConsent.lastUpload(ctx)) }
+    var lastError by remember { mutableStateOf(ShareConsent.lastError(ctx)) }
+    var confirming by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
         records = withContext(Dispatchers.IO) {
@@ -125,8 +131,65 @@ fun ContributePanel() {
             }
         }
 
+        Spacer(Modifier.height(11.dp))
+
+        // The consent control. One decision, honoured until withdrawn -- asking before every
+        // upload would train people to dismiss exactly the prompt they should read.
+        if (!sharing && !confirming) {
+            Btn("Contribute automatically") { confirming = true }
+        } else if (confirming) {
+            Text(
+                "Your measurements will be sent about once a day, on Wi-Fi only, for as long as " +
+                    "this stays on. You can turn it off at any time.",
+                color = T.Dim, fontSize = 12.sp, lineHeight = 16.sp
+            )
+            Spacer(Modifier.height(7.dp))
+            Text(
+                "Turning it off later stops anything new being sent. What you have already " +
+                    "contributed stays in the shared map \u2014 once it is mixed with other " +
+                    "people's it cannot be pulled back out.",
+                color = T.Warn, fontSize = 12.sp, lineHeight = 16.sp
+            )
+            Spacer(Modifier.height(9.dp))
+            Btn("Yes, contribute") {
+                ShareConsent.setEnabled(ctx, true)
+                sharing = true; confirming = false
+                note = "Sending…"
+                scope.launch {
+                    val ok = withContext(Dispatchers.IO) { Uploader.uploadNow(ctx) }
+                    lastUpload = ShareConsent.lastUpload(ctx)
+                    lastError = ShareConsent.lastError(ctx)
+                    note = if (ok) "Sent. It will send again about once a day."
+                           else "Not sent: " + (lastError ?: "unknown reason")
+                }
+            }
+            Spacer(Modifier.height(6.dp))
+            Btn("Not now", ghost = true) { confirming = false }
+        } else {
+            Text(
+                if (lastUpload > 0)
+                    "Contributing. Last sent " + ago(lastUpload) + "."
+                else "Contributing. Nothing sent yet.",
+                color = T.Good, fontSize = 12.sp, lineHeight = 16.sp
+            )
+            lastError?.let {
+                Spacer(Modifier.height(5.dp))
+                // Shown rather than swallowed: a toggle that is on while nothing has ever been
+                // sent is the quiet failure this project keeps writing rules against.
+                Text("Last attempt failed: $it", color = T.Bad, fontSize = 11.5.sp, lineHeight = 15.sp)
+            }
+            Spacer(Modifier.height(8.dp))
+            Btn("Stop contributing", ghost = true) {
+                ShareConsent.setEnabled(ctx, false); sharing = false
+                note = "Stopped. Nothing further will be sent."
+            }
+        }
+
         Spacer(Modifier.height(7.dp))
-        Btn("Share my measurements") {
+        // The manual path, kept alongside the toggle. Sending the file yourself is how you check
+        // what a contribution actually contains, and how someone who will not switch on automatic
+        // sharing can still hand over a one-off.
+        Btn("Share my measurements", ghost = true) {
             if (busy) return@Btn
             busy = true; note = "Building…"
             scope.launch {
@@ -207,5 +270,16 @@ private fun Btn(text: String, ghost: Boolean = false, onClick: () -> Unit) {
     ) {
         Text(text, color = if (ghost) T.Text else Color(0xFF05192E), fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold)
+    }
+}
+
+/** "3 hours ago" -- coarse on purpose; the exact second of an upload is nobody's business. */
+private fun ago(wall: Long): String {
+    val m = (System.currentTimeMillis() - wall) / 60_000
+    return when {
+        m < 2 -> "just now"
+        m < 60 -> "$m minutes ago"
+        m < 48 * 60 -> "${m / 60} hours ago"
+        else -> "${m / 1440} days ago"
     }
 }

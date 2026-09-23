@@ -184,7 +184,15 @@ data class Bin(
     val leafCount: Int,
     val mergeReason: String,
     val firstSeenMillis: Long,
-    val lastSeenMillis: Long
+    val lastSeenMillis: Long,
+    /**
+     * Signal histograms per band label, measured rather than apportioned.
+     *
+     * Empty on a bin restored from a version that predates them, which reads correctly as "this
+     * bin cannot say" rather than as a band with no signal.
+     */
+    val bandRsrpHist: Map<String, Map<Int, Long>> = emptyMap(),
+    val bandSinrHist: Map<String, Map<Int, Long>> = emptyMap()
 ) {
     /** `anchor_stability` = min of whichever of the two anchor metrics are non-null. */
     val anchorStability: Double get() = nrAnchor?.let { min(it, transportAnchor) } ?: transportAnchor
@@ -674,6 +682,17 @@ object MapBinBuilder {
         val sinr = HashMap<Int, Long>()
         val rats = HashMap<String, Long>()
         val bands = HashMap<String, Long>()
+        /**
+         * Signal per band, not apportioned from the bin's total.
+         *
+         * Without these a contribution can only take the bin's whole histogram and split it
+         * across bands by time share, which produces per-band distributions that are the same
+         * shape scaled -- identical-looking bands, when telling bands apart is the entire point.
+         * That is what shipped, and a real bundle showed B3 and B7 differing by a constant 1.15
+         * at every value. Measured per band or not claimed per band.
+         */
+        val bandRsrp = HashMap<String, HashMap<Int, Long>>()
+        val bandSinr = HashMap<String, HashMap<Int, Long>>()
         val plmns = HashMap<String, Long>()
         var cellChanges = 0
         var lastCell: Long? = null
@@ -876,7 +895,11 @@ object MapBinBuilder {
             s.rsrp?.let { TimeWeight.addTo(a.rsrp, it, w) }
             s.sinr?.let { TimeWeight.addTo(a.sinr, it, w) }
             TimeWeight.addTo(a.rats, s.rat, w)
-            bandLabel(s.rat, s.band)?.let { TimeWeight.addTo(a.bands, it, w) }
+            bandLabel(s.rat, s.band)?.let { label ->
+                TimeWeight.addTo(a.bands, label, w)
+                s.rsrp?.let { v -> TimeWeight.addTo(a.bandRsrp.getOrPut(label) { HashMap() }, v, w) }
+                s.sinr?.let { v -> TimeWeight.addTo(a.bandSinr.getOrPut(label) { HashMap() }, v, w) }
+            }
             TimeWeight.addTo(a.plmns, s.plmn, w)
             val cell = s.ci ?: s.pci?.toLong()?.let { -it }
             if (cell != null) {
@@ -1007,6 +1030,8 @@ object MapBinBuilder {
             sinrHist = a.sinr,
             ratMs = a.rats,
             bandMs = a.bands,
+            bandRsrpHist = a.bandRsrp,
+            bandSinrHist = a.bandSinr,
             plmnMs = a.plmns,
             topCause = 0,
             causeShare = 0.0,
@@ -1291,6 +1316,16 @@ object MapBinBuilder {
         return published
     }
 
+    /** Add up per-band histograms across bins, band by band and value by value. */
+    fun mergeNested(parts: List<Map<String, Map<Int, Long>>>): Map<String, Map<Int, Long>> {
+        val out = HashMap<String, HashMap<Int, Long>>()
+        for (p in parts) for ((band, hist) in p) {
+            val into = out.getOrPut(band) { HashMap() }
+            for ((v, ms) in hist) into[v] = (into[v] ?: 0L) + ms
+        }
+        return out
+    }
+
     /** Wilson score interval. Not the normal approximation: at n = 12 near 0 or 1 that is wrong. */
     fun wilson(p: Double, n: Int, z: Double = 1.96): DoubleArray {
         if (n <= 0) return doubleArrayOf(0.0, 1.0)
@@ -1375,6 +1410,8 @@ object MapBinBuilder {
             sinrHist = TimeWeight.sum(kids.map { it.sinrHist }),
             ratMs = TimeWeight.sum(kids.map { it.ratMs }),
             bandMs = TimeWeight.sum(kids.map { it.bandMs }),
+            bandRsrpHist = mergeNested(kids.map { it.bandRsrpHist }),
+            bandSinrHist = mergeNested(kids.map { it.bandSinrHist }),
             plmnMs = TimeWeight.sum(kids.map { it.plmnMs }),
             topCause = top?.key ?: 0,
             causeShare = top?.let { TimeWeight.fraction(it.value, observed) } ?: 0.0,

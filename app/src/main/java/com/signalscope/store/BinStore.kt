@@ -85,6 +85,7 @@ internal object BinCodec {
         put("rm", mapSL(b.ratMs)); put("bm", mapSL(b.bandMs)); put("pm", mapSL(b.plmnMs))
         put("cu", b.childUnits); put("lc", b.leafCount)
         put("fs", b.firstSeenMillis); put("ls", b.lastSeenMillis)
+        put("brh", nested(b.bandRsrpHist)); put("bsh", nested(b.bandSinrHist))
     }.toString()
 
     fun decode(s: String): Bin? = runCatching {
@@ -128,9 +129,24 @@ internal object BinCodec {
             topCause = 0, causeShare = 0.0, cls = 0,
             childUnits = o.optLong("cu"), leafCount = o.optInt("lc"),
             mergeReason = "restored",
-            firstSeenMillis = o.optLong("fs"), lastSeenMillis = o.optLong("ls")
+            firstSeenMillis = o.optLong("fs"), lastSeenMillis = o.optLong("ls"),
+            // Absent on rows written before per-band histograms existed. Empty reads as "this bin
+            // cannot say", which is right -- the alternative was inventing them from the total.
+            bandRsrpHist = unnested(o.optJSONObject("brh")),
+            bandSinrHist = unnested(o.optJSONObject("bsh"))
         )
     }.getOrNull()
+
+    private fun nested(m: Map<String, Map<Int, Long>>) = JSONObject().apply {
+        m.forEach { (band, hist) -> put(band, mapIL(hist)) }
+    }
+
+    private fun unnested(o: JSONObject?): Map<String, Map<Int, Long>> {
+        if (o == null) return emptyMap()
+        val out = HashMap<String, Map<Int, Long>>(o.length())
+        o.keys().forEach { b -> out[b] = unmapIL(o.optJSONObject(b)) }
+        return out
+    }
 
     private fun mapIL(m: Map<Int, Long>) = JSONObject().apply { m.forEach { (k, v) -> put(k.toString(), v) } }
     private fun mapSL(m: Map<String, Long>) = JSONObject().apply { m.forEach { (k, v) -> put(k, v) } }

@@ -79,18 +79,29 @@ object Contribution {
         for (b in bins) {
             val area = runCatching { MapHex.cellToParent(b.id, SHARE_RES) }.getOrNull() ?: continue
             val plmn = b.plmn ?: continue
-            // A bin can have seen more than one band; each band's share of the time is carried
-            // separately rather than collapsing to the dominant one, which would throw away
-            // exactly the comparison the shared map exists to make.
-            val bandTotal = b.bandMs.values.sum().takeIf { it > 0 } ?: continue
             for ((band, ms) in b.bandMs) {
+                // "band 40" is what bandLabel emits when the RAT did not say whether the number
+                // is LTE's or NR's -- 3GPP numbers them independently and several collide, so B40
+                // and n40 are different spectrum. Locally that ambiguity is worth showing. On a
+                // shared map it would either mislabel a band or split one into two cells that
+                // never merge, so it is not contributed at all. Not knowing is not a band.
+                if (!band.startsWith("B") && !band.startsWith("n")) continue
+
+                val rsrp = b.bandRsrpHist[band]
+                val sinr = b.bandSinrHist[band]
+                // A bin persisted before per-band histograms existed has none. It is skipped
+                // rather than filled in from the bin's total: apportioning the whole bin's
+                // distribution across its bands is what produced identically-shaped bands in the
+                // first bundle this app ever generated.
+                if (rsrp.isNullOrEmpty() && sinr.isNullOrEmpty()) continue
+
                 val key = Triple(area, plmn, band)
                 val st = grouped.getOrPut(key) { Stats() }
-                val share = ms.toDouble() / bandTotal
                 st.observedMs += ms
-                st.samples += (b.nObs * share).toLong()
-                addScaled(st.rsrp, b.rsrpHist, share)
-                addScaled(st.sinr, b.sinrHist, share)
+                val bandTotal = b.bandMs.values.sum().takeIf { it > 0 } ?: continue
+                st.samples += (b.nObs * (ms.toDouble() / bandTotal)).toLong()
+                rsrp?.forEach { (v, w) -> st.rsrp[v] = (st.rsrp[v] ?: 0L) + w }
+                sinr?.forEach { (v, w) -> st.sinr[v] = (st.sinr[v] ?: 0L) + w }
             }
         }
 
@@ -129,13 +140,6 @@ object Contribution {
     suspend fun recordCount(ctx: Context): Int =
         runCatching { JSONObject(build(ctx)).getJSONArray("records").length() }.getOrDefault(0)
 
-    private fun addScaled(into: HashMap<Int, Long>, from: Map<Int, Long>, share: Double) {
-        if (share <= 0.0) return
-        for ((v, ms) in from) {
-            val scaled = (ms * share).toLong()
-            if (scaled > 0) into[v] = (into[v] ?: 0L) + scaled
-        }
-    }
 
     private fun hist(m: Map<Int, Long>): JSONObject =
         JSONObject().apply { m.toSortedMap().forEach { (v, ms) -> put(v.toString(), ms) } }
