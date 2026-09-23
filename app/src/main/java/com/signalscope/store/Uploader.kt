@@ -66,10 +66,18 @@ object Uploader {
     suspend fun uploadNow(ctx: Context): Boolean {
         if (!ShareConsent.enabled(ctx)) return false
         val body = runCatching { Contribution.build(ctx) }.getOrNull()
-        if (body == null) { ShareConsent.noteError(ctx, "could not build a contribution"); return false }
+        if (body == null) {
+            ShareConsent.noteError(ctx, "could not build a contribution")
+            return false
+        }
         if (runCatching { org.json.JSONObject(body).getJSONArray("records").length() }
                 .getOrDefault(0) == 0) {
-            ShareConsent.noteError(ctx, "nothing measured yet to share")
+            // Not an error. Having nothing to contribute yet is an ordinary state -- a fresh
+            // install is in it, and so is any phone whose stored bins predate per-band histograms.
+            // Reporting it as a failed attempt puts a red line under a working app, and a warning
+            // that cries wolf is how the real one gets ignored. Any stale error is cleared, since
+            // "there is nothing to send" supersedes whatever went wrong last time.
+            ShareConsent.clearError(ctx)
             return false
         }
         return runCatching {

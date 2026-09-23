@@ -60,5 +60,10 @@ object ShareConsent {
         prefs(ctx).edit().putString(KEY_LAST_ERROR, reason.take(160)).apply()
     }
 
+    /** Forget the last failure, without recording a success. */
+    fun clearError(ctx: Context) {
+        prefs(ctx).edit().remove(KEY_LAST_ERROR).apply()
+    }
+
     private fun prefs(ctx: Context) = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 }

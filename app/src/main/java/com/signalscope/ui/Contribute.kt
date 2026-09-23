@@ -5,6 +5,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Text
@@ -70,6 +72,14 @@ fun ContributePanel() {
     LaunchedEffect(Unit) {
         records = withContext(Dispatchers.IO) {
             runCatching { Contribution.recordCount(ctx) }.getOrDefault(0)
+        }
+        // A stored failure outlives the condition that caused it. With nothing to contribute there
+        // is nothing that can have failed, so the old message is cleared rather than left under a
+        // line that already says the app is waiting -- two contradictory statements, one of them
+        // in red, is worse than either alone.
+        if (records == 0) {
+            ShareConsent.clearError(ctx)
+            lastError = null
         }
     }
 
@@ -178,12 +188,14 @@ fun ContributePanel() {
             Btn("Not now", ghost = true) { confirming = false }
         } else {
             Text(
-                if (lastUpload > 0)
-                    "Contributing. Last sent " + ago(lastUpload) + "."
-                else "Contributing. Nothing sent yet.",
+                when {
+                    lastUpload > 0 -> "Contributing. Last sent " + ago(lastUpload) + "."
+                    records == 0 -> "Contributing. Waiting for something to send."
+                    else -> "Contributing. Nothing sent yet."
+                },
                 color = T.Good, fontSize = 12.sp, lineHeight = 16.sp
             )
-            lastError?.let {
+            lastError?.takeIf { records != 0 }?.let {
                 Spacer(Modifier.height(5.dp))
                 // Shown rather than swallowed: a toggle that is on while nothing has ever been
                 // sent is the quiet failure this project keeps writing rules against.

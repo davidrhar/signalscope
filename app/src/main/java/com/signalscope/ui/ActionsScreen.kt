@@ -67,20 +67,14 @@ fun ActionsScreen(modifier: Modifier = Modifier) {
         // way it does for every other tab, and drawing a second pair printed "Actions" twice.
         // The improved subtitle moved to Nav.kt where the first one lives.
 
-        // First on the screen, above the diagnosis.
+        // Sharing is not here. It lives on the Map tab, beside the map it contributes to, where
+        // the question "should I share this?" is actually asked. Having it in both places meant
+        // the same consent wording appeared twice on one screen's worth of scrolling, which makes
+        // a reader wonder which one is the real setting.
         //
-        // The rule elsewhere on this tab is that findings come before levers, because a lever with
-        // no finding behind it is a guess. These are not levers. They are the controls over a
-        // person's own data -- contribute it, get a copy, destroy it -- and the only things here
-        // somebody arrives looking for rather than reads their way down to.
-        //
-        // They have been moved twice. First from beside the settings deep links, then to just
-        // below DiagnosticPanels, which is itself several screens long -- so "the top" still meant
-        // scrolling past every panel in the app. The question "where is the consent?" is the
-        // evidence that below the diagnosis is not far enough up. A control nobody can find has
-        // not been provided, whatever the layout order says.
-        ContributePanel()
-
+        // Export and delete stay, because they are about the data on this phone rather than about
+        // the shared map, and they go first: they are the controls somebody arrives looking for
+        // rather than reads their way down to. A control nobody can find has not been provided.
         YourDataPanel()
 
         // The diagnosis leads the levers, because an action is only as good as the reason for it —

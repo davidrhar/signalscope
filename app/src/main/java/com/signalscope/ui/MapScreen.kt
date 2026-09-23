@@ -104,6 +104,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var crowdBusy by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Bin?>(null) }
     var legendOpen by remember { mutableStateOf(false) }
+    /** The sharing controls, reachable from the map rather than only from a dense Actions tab. */
+    var shareOpen by remember { mutableStateOf(false) }
     var tilesRendered by remember { mutableStateOf<Boolean?>(null) }
     var styleError by remember { mutableStateOf<String?>(null) }
     var regionsOpen by remember { mutableStateOf(false) }
@@ -353,9 +355,20 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     Legend(m, layer) { legendOpen = false }
                     Spacer(Modifier.height(6.dp))
                 }
+                if (shareOpen) {
+                    SharePanel { shareOpen = false }
+                    Spacer(Modifier.height(6.dp))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Chip(if (legendOpen) "Hide legend" else "Legend", legendOpen) {
-                        legendOpen = !legendOpen
+                        legendOpen = !legendOpen; if (legendOpen) shareOpen = false
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    // Sharing belongs beside the map it contributes to. On the Actions tab it is
+                    // correct and surrounded by twenty diagnostic panels, which is where a control
+                    // goes to be missed.
+                    Chip(if (shareOpen) "Hide share" else "Share", shareOpen) {
+                        shareOpen = !shareOpen; if (shareOpen) legendOpen = false
                     }
                     here?.let { (lat, lng) ->
                         Spacer(Modifier.width(6.dp))
@@ -366,7 +379,13 @@ fun MapScreen(modifier: Modifier = Modifier) {
             } else if (here != null) {
                 // No bins yet, but the phone knows where it is -- the one case where recentring
                 // matters most, since there is nothing on screen to orient by.
+                if (shareOpen) {
+                    SharePanel { shareOpen = false }
+                    Spacer(Modifier.height(6.dp))
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Chip(if (shareOpen) "Hide share" else "Share", shareOpen) { shareOpen = !shareOpen }
+                    Spacer(Modifier.width(6.dp))
                     Chip("My location", false) { mapState.recentre(here.first, here.second) }
                 }
                 Spacer(Modifier.height(6.dp))
@@ -1710,6 +1729,47 @@ private fun CellsBlock(b: Bin) {
                     "an identity.",
                 color = T.Faint, fontSize = 9.sp, lineHeight = 12.sp
             )
+        }
+    }
+}
+
+/**
+ * The sharing controls, sized for the map rather than for a settings list.
+ *
+ * Wraps the same [ContributePanel] rather than restating it. The consent wording -- particularly
+ * the sentence about what cannot be withdrawn -- has to be identical wherever it is agreed to, and
+ * two copies of it would drift the first time one was edited. The map gets a scrollable, height-
+ * capped frame around the one panel, not a second panel that happens to look like it.
+ */
+@Composable
+private fun SharePanel(onClose: () -> Unit) {
+    Glass(Modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                "SHARING",
+                color = T.Faint, fontSize = 9.sp, fontFamily = Mono,
+                fontWeight = FontWeight.Bold, letterSpacing = 1.3.sp,
+                modifier = Modifier.weight(1f)
+            )
+            Text(
+                "close", color = T.Dim, fontSize = 10.sp,
+                modifier = Modifier.clickableNoRipple(onClose)
+            )
+        }
+        Spacer(Modifier.height(4.dp))
+        // Capped and scrollable: the map is behind this, and a panel that grows to cover it would
+        // be answering a question nobody asked while hiding the one they did.
+        //
+        // The scroll state is remembered per opening rather than for the life of the screen. Kept
+        // across openings it restored whatever offset the last visit left, so the panel opened
+        // part-way down with its first line cut off -- which reads as a rendering fault rather
+        // than as scroll position, and puts the sentence explaining what sharing is off-screen.
+        val shareScroll = rememberScrollState()
+        LaunchedEffect(Unit) { shareScroll.scrollTo(0) }
+        Column(
+            Modifier.heightIn(max = 340.dp).verticalScroll(shareScroll)
+        ) {
+            ContributePanel()
         }
     }
 }
