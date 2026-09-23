@@ -72,6 +72,17 @@ fun ActionsScreen(modifier: Modifier = Modifier) {
         // Everything below them is a lever, and a lever with no finding behind it is a guess.
         DiagnosticPanels()
 
+        // Above the levers, not below twenty diagnostic panels.
+        //
+        // These two are the only things on this screen a person might come looking for: get my data
+        // out, contribute it, destroy it. They were originally placed next to the settings deep
+        // links, three screens of scrolling down, which made the consent screen's promise -- "you
+        // can stop, export or delete everything at any time" -- true only in the sense that the
+        // buttons existed somewhere. A control nobody can find has not been provided.
+        ContributePanel()
+
+        YourDataPanel()
+
         SecHead("Running now", "decides what may run")
         TrafficHero(traffic)
 
@@ -118,8 +129,6 @@ fun ActionsScreen(modifier: Modifier = Modifier) {
                 onRun = { notice = ActionRunner.run(r, traffic, shizuku).text }
             )
         }
-
-        YourDataPanel()
 
         SecHead("Settings deep links", "tier 0 · these work")
         Text(
