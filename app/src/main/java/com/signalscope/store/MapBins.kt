@@ -336,7 +336,19 @@ data class MapModel(
      */
     val observedMs: Long = 0,
     val locatedMs: Long = 0,
-    val spanMs: Long = 0
+    val spanMs: Long = 0,
+    /**
+     * Bins that came from `bin_agg` rather than from this pass over the raw rows.
+     *
+     * Every other counter in this model describes the *live* build -- how many samples it placed,
+     * how many fixes it had. Once persisted aggregates were merged in, those counters stopped
+     * describing what the map draws: after a day of collecting the strip read "14/22379 samples
+     * binned, 0 % of time, 1 fix" while fifty-two bins were on screen, because the day was on disk
+     * and only the last few minutes were live. A status line that under-reports its own map by
+     * three orders of magnitude is the failure this project keeps writing rules against, so the
+     * restored count is carried and shown rather than left implicit.
+     */
+    val restoredBins: Int = 0
 ) {
     val isEmpty: Boolean get() = bins.isEmpty()
 
@@ -754,6 +766,7 @@ object MapBinBuilder {
 
         return live.copy(
             bins = merged.sortedByDescending { it.nObs },
+            restoredBins = stored.size,
             geoJson = geoJson(merged),
             buildMs = System.currentTimeMillis() - t0,
             resCounts = resCounts,
@@ -1497,7 +1510,12 @@ object MapBinBuilder {
             // decompose -- NR, whose gNB-ID length is not knowable from the identity alone -- the
             // cell is counted on its own rather than guessed at, which can only over-count, never
             // invent a mast that is not there.
-            sb.append(""""sites":${siteCount(b)}""")
+            sb.append(""""sites":${siteCount(b)},""")
+            // The network this bin is mostly on, as a filterable property. Comparing operators is
+            // the entire reason a shared map is worth building, and until now the PLMN reached the
+            // renderer nowhere at all -- it existed only as text in the detail sheet, so the map
+            // could colour by band but never answer "show me just this network".
+            sb.append(""""plmn":"${b.plmn ?: ""}"""")
             sb.append("""},"geometry":{"type":"Polygon","coordinates":[[""")
             MapHex.cellToBoundary(b.id).forEachIndexed { j, p ->
                 if (j > 0) sb.append(',')

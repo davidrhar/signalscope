@@ -31,6 +31,7 @@ import com.signalscope.collect.RegionAcquisition
 import com.signalscope.store.Bin
 import com.signalscope.store.CAUSES
 import com.signalscope.store.MapBinBuilder
+import com.signalscope.store.Networks
 import com.signalscope.store.MapHex
 import com.signalscope.store.MapModel
 import com.signalscope.store.MapProbeJoin
@@ -94,6 +95,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var model by remember { mutableStateOf<MapModel?>(null) }
     var layer by remember { mutableStateOf(MapLayer.QUALITY) }
     var basemap by remember { mutableStateOf(true) }
+    /** PLMN to show alone, or null for every network. */
+    var onlyNetwork by remember { mutableStateOf<String?>(null) }
     var selected by remember { mutableStateOf<Bin?>(null) }
     var legendOpen by remember { mutableStateOf(false) }
     var tilesRendered by remember { mutableStateOf<Boolean?>(null) }
@@ -208,6 +211,7 @@ fun MapScreen(modifier: Modifier = Modifier) {
     // to change a layer.
     LaunchedEffect(model) { model?.let { mapState.setData(it) } }
     LaunchedEffect(layer, model) { mapState.setLayer(layer.key) }
+    LaunchedEffect(onlyNetwork, model) { mapState.setNetwork(onlyNetwork) }
     LaunchedEffect(basemap) { mapState.setBasemap(basemap) }
     LaunchedEffect(selected) { mapState.setSelection(selected?.id) }
     LaunchedEffect(fix.binId) { mapState.setHere(fix.binId) }
@@ -243,6 +247,23 @@ fun MapScreen(modifier: Modifier = Modifier) {
 
         AndroidView(factory = { mapView }, modifier = Modifier.fillMaxSize())
 
+        // Which network's bins are drawn. Null is everything. Built from what the map actually
+        // holds rather than a fixed list, so it names only networks this phone has really seen --
+        // and quietly disappears on a single-network phone, where the filter would be furniture.
+        val networks = remember(m?.bins) {
+            m?.bins.orEmpty()
+                .filter { it.cls != 0 }
+                .groupingBy { it.plmn }.eachCount()
+                .entries.filter { it.key != null }
+                .sortedByDescending { it.value }
+                .mapNotNull { it.key }
+        }
+        LaunchedEffect(networks) {
+            // A filter pinned to a network that has dropped out of the data would show an empty
+            // map with no visible cause. Clear it rather than leave the user staring at nothing.
+            if (onlyNetwork != null && onlyNetwork !in networks) onlyNetwork = null
+        }
+
         // ---------------------------------------------------------------- top chrome
         Column(Modifier.align(Alignment.TopStart).fillMaxWidth()) {
             Row(
@@ -255,6 +276,20 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 }
                 Chip(if (basemap) "Basemap" else "No basemap", !basemap) { basemap = !basemap }
                 Chip(regionChipLabel(regions), regionsOpen) { regionsOpen = !regionsOpen }
+            }
+            if (networks.size > 1) {
+                Row(
+                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Chip("All networks", onlyNetwork == null) { onlyNetwork = null }
+                    networks.forEach { p ->
+                        Chip(Networks.name(p), onlyNetwork == p) {
+                            onlyNetwork = if (onlyNetwork == p) null else p
+                        }
+                    }
+                }
             }
             if (m != null) {
                 StatusStrip(m, fix, tilesRendered, styleError, regions, detailOpen) {
@@ -333,6 +368,7 @@ private class MapHolder {
     var map: MapLibreMap? = null
     var style: Style? = null
     private var pending: MapModel? = null
+    private var pendingNetwork: String? = null
     private var pendingLayer = "quality"
     private var pendingSel: Long? = null
     private var pendingHere: Long? = null
@@ -440,6 +476,7 @@ private class MapHolder {
 
             pending?.let { setData(it) }
             setLayer(pendingLayer)
+            setNetwork(pendingNetwork)
             setSelection(pendingSel)
             setHere(pendingHere)
             setBasemap(basemapOn)
@@ -511,6 +548,28 @@ private class MapHolder {
                 if (key == "rsrp") org.maplibre.android.style.layers.Property.VISIBLE
                 else org.maplibre.android.style.layers.Property.NONE
             )
+        )
+    }
+
+    /**
+     * Draw only one network's bins, or all of them when [plmn] is null.
+     *
+     * Applied as a source filter on the fill and outline rather than by rebuilding the GeoJSON:
+     * the features already carry their PLMN, so switching network is a filter swap on the GPU and
+     * not a re-upload of every polygon on every tap.
+     *
+     * `bins-lie` keeps its own filter and gains this one on top -- a bin that shows full bars and
+     * fails is only interesting for the network being looked at.
+     */
+    fun setNetwork(plmn: String?) {
+        pendingNetwork = plmn
+        val s = style ?: return
+        val f = if (plmn == null) null else Expression.eq(Expression.get("plmn"), Expression.literal(plmn))
+        s.getLayerAs<FillLayer>("bins-fill")?.let { if (f == null) it.setFilter(Expression.literal(true)) else it.setFilter(f) }
+        s.getLayerAs<LineLayer>("bins-line")?.let { if (f == null) it.setFilter(Expression.literal(true)) else it.setFilter(f) }
+        s.getLayerAs<LineLayer>("bins-lie")?.setFilter(
+            if (f == null) Expression.eq(Expression.get("lie"), Expression.literal(1))
+            else Expression.all(Expression.eq(Expression.get("lie"), Expression.literal(1)), f)
         )
     }
 
@@ -609,8 +668,11 @@ private fun StatusStrip(
             Text(
                 buildString {
                     append("${m.bins.size} bin${if (m.bins.size == 1) "" else "s"}")
+                    // Said first, because otherwise every counter after it reads as a description
+                    // of the whole map when it only describes the live pass.
+                    if (m.restoredBins > 0) append(" · ${m.restoredBins} from earlier")
                     append(" · ${m.leafCount} leaf")
-                    append(" · ${m.radioRows - m.unlocated}/${m.radioRows} samples binned")
+                    append(" · live ${m.radioRows - m.unlocated}/${m.radioRows} samples")
                     // The same fraction by time, since rows over-count the minutes the screen
                     // was on. Omitted rather than shown as 0 % when no time was observed.
                     m.locatedFrac?.let { append(" (${pct(it)} of time)") }
