@@ -1,0 +1,28 @@
+# Singapore, because that is where the measurements are and a shared map is latency-insensitive
+# but not pointlessly far-away-insensitive.
+app = "signalscope-map"
+primary_region = "sin"
+
+[build]
+
+[env]
+  DATA_DIR = "/data"
+  PORT = "8080"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Allowed to sleep. The aggregate is rebuilt lazily on read when it is stale, precisely so a
+  # stopped machine cannot silently serve an old map -- a timer would not run while stopped, and
+  # going stale quietly is worse than going down loudly.
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+
+[[mounts]]
+  source = "signalscope_data"
+  destination = "/data"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

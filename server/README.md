@@ -8,22 +8,26 @@ Three jobs, deliberately small:
 | `GET /shared-map.json` | serve the last aggregation |
 | cron, hourly | merge what is stored, publish, expire the raw |
 
-## Deploying it
+## Deployed
 
-Nobody but the account owner can do this, and it should be a deliberate act: the moment it is live
-it is a public endpoint collecting other people's measurements, and whoever runs it is a data
-controller.
+**https://signalscope-map.fly.dev** — Fly.io, Singapore (`sin`), one shared-cpu-1x machine with a
+1 GB encrypted volume at `/data`.
 
 ```bash
 cd server
-npx wrangler login
-npx wrangler r2 bucket create signalscope-bundles
-npx wrangler deploy
+flyctl deploy          # after changes
+flyctl logs            # what it is doing
+flyctl status          # whether the machine is up
+flyctl ssh console     # look inside /data
 ```
 
-Then point the app at the resulting URL. Nothing uploads by itself: the app shares a file through
-Android's share sheet, and automatic upload is a separate feature that needs its own consent
-screen, because sending a file once is not agreement to a standing upload.
+The machine is allowed to sleep when idle and wakes on the next request. That is safe here only
+because the aggregate is rebuilt lazily on read rather than on a timer — a timer in a stopped
+machine does not fire, and a map that goes quietly stale is worse than one that goes loudly down.
+
+Nothing uploads by itself. The app shares a file through Android's share sheet; automatic upload is
+a separate feature needing its own consent, because sending a file once is not agreement to a
+standing upload.
 
 ## Testing it without deploying
 
