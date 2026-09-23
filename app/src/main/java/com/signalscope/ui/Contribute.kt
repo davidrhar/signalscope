@@ -96,16 +96,25 @@ fun ContributePanel() {
             color = T.Faint, fontSize = 11.5.sp, lineHeight = 16.sp
         )
 
+        // No early return when there is nothing to send.
+        //
+        // This used to bail out here, which hid the consent control completely -- and it hid it
+        // precisely when it was most likely to be looked for, because a fresh install, or one
+        // whose stored bins predate per-band histograms, has nothing to contribute yet. Consent is
+        // a decision about what happens from now on, not about what happens to be in the buffer
+        // this minute, so it is always reachable and the app simply sends nothing until there is
+        // something to send.
         if (records == 0) {
             Spacer(Modifier.height(10.dp))
             Text(
-                "Nothing to share yet — areas appear here once the app has measured one place for " +
-                    "long enough to say something about it.",
+                "Nothing to send yet — areas appear once the app has measured one place for long " +
+                    "enough to say something about it. You can still switch contributing on; it " +
+                    "will start sending when there is something.",
                 color = T.Faint, fontSize = 11.5.sp, lineHeight = 16.sp
             )
-            return@AccentCard
         }
 
+        if (records != 0) {
         Spacer(Modifier.height(11.dp))
         Btn("See exactly what would be sent", ghost = true) {
             if (busy) return@Btn
@@ -129,6 +138,8 @@ fun ContributePanel() {
             ) {
                 Text(p, color = T.Dim, fontSize = 10.sp, fontFamily = Mono, lineHeight = 15.sp)
             }
+        }
+
         }
 
         Spacer(Modifier.height(11.dp))
@@ -185,6 +196,7 @@ fun ContributePanel() {
             }
         }
 
+        if (records != 0) {
         Spacer(Modifier.height(7.dp))
         // The manual path, kept alongside the toggle. Sending the file yourself is how you check
         // what a contribution actually contains, and how someone who will not switch on automatic
@@ -202,6 +214,7 @@ fun ContributePanel() {
                 }
                 busy = false
             }
+        }
         }
 
         note?.let {
