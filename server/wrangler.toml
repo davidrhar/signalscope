@@ -1,0 +1,12 @@
+name = "signalscope-map"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+
+# Hourly. The map is a weeks-long picture; rebuilding it more often would cost more than it tells
+# anyone, and the served copy is cached for fifteen minutes anyway.
+[triggers]
+crons = ["0 * * * *"]
+
+[[r2_buckets]]
+binding = "BUNDLES"
+bucket_name = "signalscope-bundles"

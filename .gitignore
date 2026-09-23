@@ -42,3 +42,7 @@ signalscope*.db*
 # Device- and region-specific analysis of the reference handset. Identifies its owner's carrier,
 # country, masts and movements, so it stays on this machine and never reaches the public repo.
 private/
+
+# Worker build state and local wrangler config. The source is committed; the account is not.
+server/node_modules/
+server/.wrangler/
