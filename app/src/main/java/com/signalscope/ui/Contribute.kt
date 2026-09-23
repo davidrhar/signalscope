@@ -222,7 +222,7 @@ private suspend fun previewOf(ctx: Context): String {
     val recs = doc.getJSONArray("records")
     if (recs.length() == 0) return "no areas measured yet"
     return buildString {
-        append("area          network    band  samples  week\n")
+        append("area          network    band                  samples  week\n")
         val show = minOf(recs.length(), 6)
         for (i in 0 until show) {
             val r = recs.getJSONObject(i)
@@ -230,10 +230,10 @@ private suspend fun previewOf(ctx: Context): String {
             // full 19 digits invite the reader to think it is more precise than ~460 m.
             val area = r.optLong("area").toString().takeLast(6)
             append(
-                "…%-8s  %-9s  %-4s  %-7d  %s\n".format(
+                "…%-8s  %-9s  %-20s  %-7d  %s\n".format(
                     area,
                     Networks.name(r.optString("network")).take(9),
-                    r.optString("band"),
+                    Networks.band(r.optString("band")).take(18),
                     r.optLong("samples"),
                     r.optString("week")
                 )

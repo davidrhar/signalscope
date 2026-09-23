@@ -52,6 +52,19 @@ object Networks {
         plmn != null && NAMES.containsKey(normalise(plmn))
 
     /**
+     * A band label as a person should read it.
+     *
+     * "?40" is what a contribution carries when the RAT did not say whether the number is LTE's
+     * or NR's. Rendering that raw invites the reader to think the app is confused; saying what is
+     * actually unknown invites them to discount it correctly.
+     */
+    fun band(label: String?): String {
+        val b = label?.trim().orEmpty()
+        if (b.isEmpty()) return "band unknown"
+        return if (b.startsWith("?")) "band ${b.drop(1)}, type not reported" else b
+    }
+
+    /**
      * `525-010` and `525-10` are the same network written two ways.
      *
      * The modem reports MNC with or without a leading zero depending on the API that produced it,

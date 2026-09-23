@@ -79,13 +79,8 @@ object Contribution {
         for (b in bins) {
             val area = runCatching { MapHex.cellToParent(b.id, SHARE_RES) }.getOrNull() ?: continue
             val plmn = b.plmn ?: continue
-            for ((band, ms) in b.bandMs) {
-                // "band 40" is what bandLabel emits when the RAT did not say whether the number
-                // is LTE's or NR's -- 3GPP numbers them independently and several collide, so B40
-                // and n40 are different spectrum. Locally that ambiguity is worth showing. On a
-                // shared map it would either mislabel a band or split one into two cells that
-                // never merge, so it is not contributed at all. Not knowing is not a band.
-                if (!band.startsWith("B") && !band.startsWith("n")) continue
+            for ((rawBand, ms) in b.bandMs) {
+                val band = shareBandLabel(rawBand)
 
                 val rsrp = b.bandRsrpHist[band]
                 val sinr = b.bandSinrHist[band]
@@ -140,6 +135,31 @@ object Contribution {
     suspend fun recordCount(ctx: Context): Int =
         runCatching { JSONObject(build(ctx)).getJSONArray("records").length() }.getOrDefault(0)
 
+
+    /**
+     * The band label a contribution carries.
+     *
+     * `bandLabel` emits "band 40" when the RAT did not say which numbering applies. 3GPP numbers
+     * LTE and NR bands independently and several collide, so B40 and n40 are different spectrum.
+     *
+     * Three ways to handle that, and only one is honest:
+     *
+     *  - **Merge into "B40".** A guess, and a wrong one where it matters: the reference device's
+     *    first real bundle contained "band 78", and 78 is an NR number with no LTE counterpart in
+     *    use. Merging would have relabelled NR spectrum as LTE.
+     *  - **Drop it.** What this did first. It discards a measured place -- an area whose only
+     *    readings were RAT-less vanishes from the shared map entirely, which reads as "nobody has
+     *    been there". On this device that was 3.3 % of observed time.
+     *  - **Keep the number, flag the ambiguity.** "?40". It never merges with B40 or n40, because
+     *    we do not know that it is either; and it never merges with "?78", because those are not
+     *    the same spectrum whatever the numbering. Nothing is thrown away and nothing is claimed.
+     *
+     * The map shows these as "band 40, RAT not reported". A category a reader can see and discount
+     * beats a silence they cannot.
+     */
+    fun shareBandLabel(raw: String): String =
+        if (raw.startsWith("B") || raw.startsWith("n")) raw
+        else "?" + raw.removePrefix("band ").trim()
 
     private fun hist(m: Map<Int, Long>): JSONObject =
         JSONObject().apply { m.toSortedMap().forEach { (v, ms) -> put(v.toString(), ms) } }
