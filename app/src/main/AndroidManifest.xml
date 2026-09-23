@@ -35,7 +35,6 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <!-- specialUse is the one type Android 15+ still lets a service start from boot. See BootReceiver. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <!-- Resume a monitoring run after the phone restarts, if the user left collection on. -->
@@ -74,7 +73,7 @@
         <service
             android:name=".collect.CollectorService"
             android:exported="false"
-            android:foregroundServiceType="location|dataSync|specialUse">
+            android:foregroundServiceType="location|specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Continuous on-device network diagnostics, started and stoppable by the user. Used only when a location service is not permitted, such as after a restart. No collected data leaves the device." />

@@ -270,25 +270,12 @@ class CollectorService : LifecycleService() {
         return START_STICKY
     }
 
-    /** dataSync services are capped at 6 h per 24 h on API 35+; stop cleanly rather than be killed. */
-    override fun onTimeout(startId: Int, fgsType: Int) {
-        LiveState.degraded.value = "Collection paused: the 6-hour limit for this mode was reached. " +
-                "Grant location permission for uninterrupted collection."
-        LiveState.running.value = false
-        stopSelf()
-    }
-
     private fun hasLocation(): Boolean =
         checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED ||
         checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) ==
                 PackageManager.PERMISSION_GRANTED
 
-    /**
-     * `location` is the type we want -- it has no timeout. It is only legal while location
-     * permission is held, so fall back to `dataSync`, which runs without it at the cost of a
-     * 6 h/24 h cap. Returns false if neither can start.
-     */
     /** The foreground type currently held, so a later start can tell whether to upgrade. */
     @Volatile private var heldType = 0
 
@@ -302,9 +289,9 @@ class CollectorService : LifecycleService() {
      *  2. **specialUse** -- everything except position, with no time cap. This is what a start from
      *     BOOT_COMPLETED lands on: Android 14+ refuses location from boot without
      *     background-location permission, and Android 15+ refuses dataSync from boot outright.
-     *  3. **dataSync** -- last resort. Capped at six hours a day, which is why it is no longer
-     *     second: a monitoring run should not quietly stop after six hours on a phone where
-     *     location was merely unavailable for a moment.
+     *
+     * There is deliberately no `dataSync` fallback. Play accepts that type only for transferring
+     * data, and a monitor is not a transfer; it also stopped after six hours a day.
      */
     private fun startForegroundSafely(): Boolean {
         val wantLocation = hasLocation()
@@ -318,8 +305,6 @@ class CollectorService : LifecycleService() {
                 else
                     "Running without location permission: coverage mapping is off. Grant location " +
                         "for full collection.")
-            add(ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC to
-                "Running in reduced mode: collection stops after 6 hours.")
         }
         for ((type, degraded) in attempts) {
             val note = when (type) {
