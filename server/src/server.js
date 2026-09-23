@@ -4,6 +4,7 @@
  *   POST /contribute         accept one bundle, store it raw
  *   GET  /shared-map.json    serve the aggregation, rebuilding it if stale
  *   GET  /health             liveness, and a count of what is held
+ *   GET  /privacy            the app's privacy policy, the URL Google Play links to
  *
  * ## Why rebuilding is lazy rather than scheduled
  *
@@ -25,7 +26,8 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readdir, readFile, writeFile, stat, rm } from 'node:fs/promises';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { sharedMap } from './aggregate.js';
 
 const DATA = process.env.DATA_DIR || '/data';
@@ -39,6 +41,10 @@ const RAW_RETENTION_DAYS = 30;
 const MAX_AGE_MS = 60 * 60 * 1000;
 
 await mkdir(RAW, { recursive: true });
+
+// Read once at start. It changes only with a deploy, and a policy page that fails to load is
+// something Play review notices before we do.
+const PRIVACY = await readFile(join(dirname(fileURLToPath(import.meta.url)), 'privacy.html'));
 
 let rebuilding = null;
 
@@ -98,12 +104,25 @@ function send(res, status, body) {
 createServer(async (req, res) => {
   try {
     const url = new URL(req.url, 'http://localhost');
+    // HEAD is answered as GET; Node drops the body itself. Link checkers -- Play Console's
+    // privacy-policy check among them -- probe with HEAD, and a 404 there reads as a dead page.
+    const method = req.method === 'HEAD' ? 'GET' : req.method;
+    const path = url.pathname.toLowerCase().replace(/\/+$/, '') || '/';
 
-    if (req.method === 'GET' && url.pathname === '/health') {
+    if (method === 'GET' && url.pathname === '/health') {
       return send(res, 200, { ok: true, bundles: (await bundlePaths()).length });
     }
 
-    if (req.method === 'GET' && url.pathname === '/shared-map.json') {
+    if (method === 'GET' && path === '/privacy') {
+      res.writeHead(200, {
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'public, max-age=3600',
+        'content-length': PRIVACY.length,
+      });
+      return res.end(PRIVACY);
+    }
+
+    if (method === 'GET' && url.pathname === '/shared-map.json') {
       const map = await currentMap();
       const text = JSON.stringify(map);
       res.writeHead(200, {

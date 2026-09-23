@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SignalScope Privacy Policy</title>
+<meta name="description" content="How the SignalScope Android app, published by Bonufied Pte Ltd, handles your data.">
+<style>
+  :root { --bg: #fbfbf9; --ink: #1d1f22; --muted: #5d636b; --rule: #e2e2dc; --accent: #1f6f8b; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16181b; --ink: #e8e8e4; --muted: #a0a6ad; --rule: #2e3136; --accent: #6cc0dc; }
+  }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.6 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 42em; margin: 0 auto; padding: 2.5em 16px 4em; }
+  h1 { font-size: 1.9rem; line-height: 1.2; margin: 0 0 .3em; }
+  h2 { font-size: 1.2rem; margin: 2em 0 .5em; }
+  .updated { color: var(--muted); font-size: .9rem; font-style: italic; margin-top: 0; }
+  a { color: var(--accent); }
+  ul { padding-left: 1.3em; }
+  li { margin: .3em 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+  th, td { text-align: left; vertical-align: top; padding: .5em .6em .5em 0; border-bottom: 1px solid var(--rule); }
+  th { font-weight: 600; }
+  code { font-size: .9em; }
+  footer { margin-top: 3em; padding-top: 1em; border-top: 1px solid var(--rule); color: var(--muted); font-size: .88rem; }
+</style>
+</head>
+<body>
+<main>
+<h1>SignalScope Privacy Policy</h1>
+<p class="updated">Last updated: 23 September 2026</p>
+
+<p>
+  This explains how the <strong>SignalScope</strong> Android app handles your data. SignalScope is
+  published by Bonufied Pte Ltd ("Bonufied", "we", "us"), a company registered in Singapore, and
+  this policy is written in line with Singapore's Personal Data Protection Act (PDPA).
+</p>
+<p>
+  <strong>In short:</strong> SignalScope keeps what it measures on your phone. Nothing leaves your
+  phone unless you turn on <em>Contribute</em> to the shared coverage map, and even then what is sent
+  is coarse, anonymous summary data. There are no accounts, no ads, no analytics and no tracking.
+</p>
+
+<h2>What the app records on your phone</h2>
+<p>
+  To work out <em>why</em> your mobile data drops, SignalScope records the following in a database
+  stored on your device:
+</p>
+<ul>
+  <li><strong>Mobile network state:</strong> signal strength and quality, network type (4G, 5G and so on),
+    frequency band, mobile network operator, which mobile mast (cell) is serving you, and the state of each SIM.</li>
+  <li><strong>Connection state:</strong> whether you are on Wi-Fi or mobile data, and whether the
+    connection actually works, including the results of small connection and speed tests.</li>
+  <li><strong>Whether a call or audio is in progress:</strong> only whether one is happening, so the app
+    avoids running tests that would interrupt it. It never records who you call or what you play.</li>
+  <li><strong>Approximate location</strong>, if you grant location permission. The app never stores
+    your exact latitude and longitude. Each position is rounded to a hexagonal area before it is saved.
+    The smallest of these areas is about 65 m across.</li>
+</ul>
+<p>
+  Please treat this data as sensitive. Even rounded, a timestamped history of areas and serving masts
+  is a record of where you have been. This record is kept whether or not you grant location
+  permission, because the serving mast is itself a movement history.
+</p>
+<p>
+  This data stays on your phone. We do not receive it and cannot see it.
+</p>
+
+<h2>What leaves your phone</h2>
+<table>
+  <tr><th>What</th><th>Where to</th><th>What is sent</th></tr>
+  <tr>
+    <td>Shared coverage map contribution<br><em>(only if you turn on Contribute)</em></td>
+    <td>Our server, <code>signalscope-map.fly.dev</code>, hosted by Fly.io in Singapore</td>
+    <td>A summary of signal quality per area (about 460 m across), mobile network and band, dated
+      only to the week. It contains <strong>no</strong> exact location, no serving-mast identities,
+      no times of day, and no device, account or installation identifier. Automatic contributions are
+      sent at most once a day and only over Wi-Fi or another unmetered connection.</td>
+  </tr>
+  <tr>
+    <td>Connection and speed tests</td>
+    <td>Cloudflare (<code>1.1.1.1</code>, <code>one.one.one.one</code>, <code>speed.cloudflare.com</code>)</td>
+    <td>Test traffic only, such as random bytes. No personal data. These tests use up to about
+      1 MB of mobile data a day.</td>
+  </tr>
+  <tr>
+    <td>Map downloads</td>
+    <td>Protomaps map files hosted on Source Cooperative (<code>data.source.coop</code>), and the
+      shared map from our server</td>
+    <td>Requests for map data only. No personal data.</td>
+  </tr>
+  <tr>
+    <td>Exports</td>
+    <td>Wherever you choose</td>
+    <td>If you use Export, the app hands a file to Android's share sheet and you pick where it goes.
+      Nothing is sent unless you choose to share it.</td>
+  </tr>
+</table>
+<p>
+  Like any internet service, these providers see your device's IP address when your phone connects to
+  them. Our own server does not record IP addresses, set cookies or assign identifiers to contributions.
+</p>
+
+<h2>How we use shared contributions</h2>
+<p>
+  Contributions are combined with those from other phones to build a public map comparing mobile
+  network coverage across areas. An area is published only once at least three separate contributions
+  cover it. Contributions are kept as received for up to 30 days and then deleted, leaving only the
+  combined map. Because contributions carry no identifier, they cannot be linked to you or to each
+  other, and we cannot pick out any one person's contribution.
+</p>
+<p>
+  We do not sell data, and we do not use it for advertising or profiling.
+</p>
+
+<h2>Permissions the app asks for</h2>
+<ul>
+  <li><strong>Phone state:</strong> to read signal, network and SIM status. The app does not read your
+    phone number, calls or messages.</li>
+  <li><strong>Location (precise and approximate):</strong> Android needs this for detailed cell
+    information and to place measurements on the map. Positions are rounded before they are saved.</li>
+  <li><strong>Network access and network state:</strong> to see which connection is in use and to run
+    connection tests.</li>
+  <li><strong>Foreground service, notifications and start at boot:</strong> so measurement can keep
+    running, with a visible notification, while the app is not on screen.</li>
+  <li><strong>Shizuku (optional):</strong> if you have installed the Shizuku app and grant access,
+    SignalScope can read some additional radio details. It is not required.</li>
+</ul>
+
+<h2>Your choices and deleting your data</h2>
+<ul>
+  <li>Contribute is off until you turn it on, and you can turn it off at any time in the app.</li>
+  <li>To delete everything SignalScope has recorded, clear the app's storage in Android Settings or
+    uninstall the app.</li>
+  <li>We cannot delete or return a contribution you have already sent, because nothing in it identifies
+    you or your phone.</li>
+</ul>
+
+<h2>Children</h2>
+<p>SignalScope is intended for adults (18 and over) and is not directed at children.</p>
+
+<h2>Security</h2>
+<p>
+  All data the app sends to our server uses encrypted HTTPS connections. Our server's storage is encrypted.
+</p>
+
+<h2>Changes to this policy</h2>
+<p>
+  If the app's handling of data changes, we will update this page and the date at the top before the
+  change is released.
+</p>
+
+<h2>Contact</h2>
+<p>
+  Questions about this policy or your data: use the contact form at
+  <a href="https://bonufied.com/contact">bonufied.com/contact</a>.
+</p>
+
+<footer>
+  Bonufied Pte Ltd · UEN 202507325E · 60 Paya Lebar Road, #05-01 Paya Lebar Square, Singapore 409051<br>
+  See also the <a href="https://bonufied.com/privacy">Bonufied website privacy policy</a>.
+</footer>
+</main>
+</body>
+</html>
