@@ -719,9 +719,27 @@ object MapBinBuilder {
      * own id and resolution merges a bin restored from disk with the live one instead. Exposed so
      * [BinAggregator] does not reimplement a merge that has to stay identical to the builder's.
      */
-    fun combineSame(views: List<Bin>): Bin =
-        if (views.size == 1) views.first()
-        else combine(views, views.first().id, views.first().res, "restored+live")
+    fun combineSame(views: List<Bin>): Bin {
+        val merged =
+            if (views.size == 1) views.first()
+            else combine(views, views.first().id, views.first().res, "restored+live")
+        // Classify, always -- including the single-view case, which is the one that was wrong.
+        //
+        // BinCodec decodes cls, topCause and causeShare as zero on purpose: the thresholds that
+        // decide an outcome class change as the project learns, so a stored class would keep
+        // asserting whatever was true the day it was written. Its comment said the builder
+        // recomputes them. The builder does -- in combine() and in toLeaf() -- but NOT here, and
+        // a bin restored from disk with no live counterpart takes exactly this path. It was
+        // returned untouched with cls = 0, which the map draws as "not enough evidence".
+        //
+        // Since bins are folded to disk every few minutes and the live buffer holds only the last
+        // few, almost every bin on the map is restored-only. The whole map read as unmeasured
+        // while sitting on days of measurements. classify() is a pure function of the accumulator
+        // fields, so running it again on an already-classified merge costs nothing and removes the
+        // path where it does not run at all.
+        val withCause = merged.copy(topCause = cause(merged), causeShare = merged.causeShare)
+        return withCause.copy(cls = classify(withCause).code)
+    }
 
     /** Leaf bins for one explicit set of fixes, without touching what is persisted. */
     suspend fun binsFrom(ctx: Context, fixes: List<MapFix>): List<Bin> = runCatching {
