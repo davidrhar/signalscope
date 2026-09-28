@@ -165,6 +165,10 @@ private fun Root() {
             RouteCard(net)
 
             if (active != null) {
+                // Before the cell's own numbers, because "this mast has done this to you before"
+                // is the answer to the question being asked while a call breaks up, and the
+                // numbers are the evidence for it rather than the point.
+                SiteCard(active)
                 SecHead("Serving cell", "updated live")
                 CellCard(active)
                 SecHead("Registration", "sub ${active.subId}")

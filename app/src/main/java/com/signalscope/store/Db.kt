@@ -222,6 +222,18 @@ interface CollectorDao {
 
     @Query("SELECT COUNT(*) FROM bin_agg") suspend fun binAggCount(): Int
 
+    // ---- accumulated per-mast experience ---------------------------------------------------
+    @Query("SELECT * FROM site_stat WHERE plmn = :plmn AND site = :site")
+    suspend fun siteStats(plmn: String, site: Long): List<SiteStat>
+
+    @Query("SELECT * FROM site_stat") suspend fun allSiteStats(): List<SiteStat>
+
+    @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun upsertSiteStats(rows: List<SiteStat>)
+
+    @Query("DELETE FROM site_stat WHERE lastSeenDay < :cutoffDay")
+    suspend fun sweepSiteStats(cutoffDay: Int): Int
+
     @Insert suspend fun insertProbe(s: ProbeResult)
     @Query("SELECT COUNT(*) FROM probe_result") suspend fun probeCount(): Int
     @Query("SELECT * FROM probe_result WHERE id > :sinceId") suspend fun probesSince(sinceId: Int): List<ProbeResult>
@@ -249,8 +261,9 @@ interface CollectorDao {
 
 @Database(
     entities = [RadioSample::class, RegistrationEvent::class, LinkEvent::class,
-        ProbeResult::class, NeighbourCell::class, InstrumentEvent::class, BinAgg::class],
-    version = 6,
+        ProbeResult::class, NeighbourCell::class, InstrumentEvent::class, BinAgg::class,
+        SiteStat::class],
+    version = 7,
     exportSchema = false
 )
 abstract class Db : RoomDatabase() {
@@ -390,10 +403,42 @@ abstract class Db : RoomDatabase() {
             }
         }
 
+        /**
+         * The diagnosis stops being a thing done to a data dump.
+         *
+         * Per-mast experience was computed by scanning up to a month of `radio_sample` every time
+         * the serving cell changed. That is expensive, it gets slower as the database grows, and
+         * -- worse -- the answer evaporates: raw rows are swept at 30 days, so a mast's record
+         * would quietly reset regardless of how long the phone had actually known it.
+         *
+         * `site_stat` accumulates instead, keyed by (network, site, hour of day). Hour of day is
+         * part of the key rather than a filter because the same mast is a different mast at a
+         * different hour: on the reference device one site put 94 % of its morning readings below
+         * usable and 2 % of its evening ones. Collapsing that into one number per site would make
+         * every warning about it wrong two thirds of the day.
+         *
+         * Counters and a histogram, so it merges by addition and a median stays a real median.
+         * lastSeenDay is whole days -- a mast's record is not a timeline of visits and should not
+         * be able to become one.
+         */
+        internal val MIGRATION_6_7_SQL = listOf(
+            "CREATE TABLE IF NOT EXISTS `site_stat` (" +
+                "`plmn` TEXT NOT NULL, `site` INTEGER NOT NULL, `hourBucket` INTEGER NOT NULL, " +
+                "`samples` INTEGER NOT NULL, `belowZero` INTEGER NOT NULL, " +
+                "`rsrqHist` TEXT NOT NULL, `lastSeenDay` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`plmn`, `site`, `hourBucket`))"
+        )
+
+        private val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_6_7_SQL.forEach { db.execSQL(it) }
+            }
+        }
+
         @Volatile private var inst: Db? = null
         fun get(ctx: Context): Db = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx.applicationContext, Db::class.java, "signalscope.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
                 .build().also { inst = it }
         }
     }

@@ -158,6 +158,10 @@ class CollectorService : LifecycleService() {
         // Gated entirely on ShareConsent: with no consent this loop wakes, finds nothing to do,
         // and sleeps again.
         runCatching { com.signalscope.store.Uploader.start(this, io) }
+        // Folds new readings into each mast's standing record. Incremental, watermarked, and the
+        // reason the Live screen can answer "has this mast been bad here before?" without
+        // rescanning a month of rows every time the serving cell changes.
+        runCatching { com.signalscope.store.SiteAggregator.start(this, io) }
         // Indoor likelihood from satellite signal, listened to only while position is already being
         // requested -- it never turns GNSS on by itself, because GNSS is the costliest radio here.
         runCatching { EnvironmentContext.start(this, io) }
@@ -340,6 +344,7 @@ class CollectorService : LifecycleService() {
         runCatching { InstrumentHealth.stop() }
         runCatching { com.signalscope.store.BinAggregator.stop() }
         runCatching { com.signalscope.store.Uploader.stop() }
+        runCatching { com.signalscope.store.SiteAggregator.stop() }
         runCatching { EnvironmentContext.stop() }
         runCatching { CarrierAggregation.stop() }
         runCatching { ActionTraffic.stop() }
