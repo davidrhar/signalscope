@@ -79,6 +79,24 @@ fun YourDataPanel() {
 
         Spacer(Modifier.height(7.dp))
 
+        Btn("Save a copy to Downloads", ghost = true) {
+            if (busy) return@Btn
+            busy = true; note = "Building the archive…"
+            scope.launch {
+                val name = withContext(Dispatchers.IO) {
+                    val r = runCatching { Export.build(ctx) }.getOrNull()
+                    r?.takeIf { it.ok }?.file?.let { Export.saveToDownloads(ctx, it) }
+                }
+                // Said plainly, because this is the one action here that puts the data where
+                // other apps can read it.
+                note = if (name == null) "Could not write to Downloads."
+                       else "Saved $name to Downloads, where other apps can read it."
+                busy = false
+            }
+        }
+
+        Spacer(Modifier.height(7.dp))
+
         if (!confirming) {
             Btn("Delete everything collected", ghost = true) { confirming = true }
         } else {

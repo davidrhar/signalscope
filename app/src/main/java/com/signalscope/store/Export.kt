@@ -38,8 +38,8 @@ import java.util.zip.ZipOutputStream
  *   deliberately omits, and what a reader can infer from it. A user cannot make a sensible
  *   decision about sharing a file whose contents they have to guess.
  * - **Nothing is written outside app-private storage.** The archive is built in `filesDir`. The
- *   only way it moves is the share sheet or the system file picker, both of which are the user
- *   pressing something.
+ *   only way it moves is the share sheet, the system file picker, or [saveToDownloads] -- all
+ *   three of which are the user pressing something.
  *
  * ## What is in it
  *
@@ -603,4 +603,42 @@ object Export {
             true
         } ?: false
     }.getOrDefault(false)
+
+    /**
+     * Put a copy in Downloads, where the owner of the data can actually get at it.
+     *
+     * The share sheet is the wrong tool for this and it took a real attempt to see why: every
+     * target it offers is a messaging app or somebody's cloud, so "take a copy of my own
+     * measurements" ends up meaning "send them to a third party". On this device the sheet listed
+     * twenty-odd apps and not one of them was a file manager.
+     *
+     * Downloads is readable by other apps, which is exactly the property the rest of this file is
+     * written to avoid -- so this is its own button, it says where the copy goes, and nothing
+     * calls it on the user's behalf. MediaStore means no storage permission on Android 10 and
+     * later, and the copy is a normal file the user can delete like any other.
+     *
+     * @return the name it was saved under, or null if it could not be written.
+     */
+    fun saveToDownloads(ctx: android.content.Context, file: java.io.File): String? = runCatching {
+        val values = android.content.ContentValues().apply {
+            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, file.name)
+            put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/zip")
+            put(android.provider.MediaStore.Downloads.IS_PENDING, 1)
+        }
+        val resolver = ctx.contentResolver
+        val uri = resolver.insert(
+            android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values
+        ) ?: return@runCatching null
+        // IS_PENDING until the bytes are all there, so nothing else sees a half-written archive.
+        resolver.openOutputStream(uri)?.use { out -> file.inputStream().use { it.copyTo(out) } }
+            ?: run { resolver.delete(uri, null, null); return@runCatching null }
+        resolver.update(
+            uri,
+            android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.IS_PENDING, 0)
+            },
+            null, null
+        )
+        file.name
+    }.getOrNull()
 }
