@@ -224,31 +224,36 @@ private fun AppHead(
                 color = T.Faint, fontSize = 11.sp, fontFamily = Mono, maxLines = 1
             )
         }
+        // The gear sits on the pill's own row rather than beside the whole block. As a sibling of
+        // the column it centred against pill AND row count together, which put it in the gap below
+        // the pill -- half a line lower than anything it lines up with.
         Column(horizontalAlignment = Alignment.End) {
-            Row(verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clip(RoundedCornerShape(999.dp))
-                    .background((if (running) T.Good else T.Faint).copy(alpha = 0.10f))
-                    .border(1.dp, (if (running) T.Good else T.Faint).copy(alpha = 0.28f),
-                        RoundedCornerShape(999.dp))
-                    .clickableNoRipple(onToggle)
-                    .padding(horizontal = 9.dp, vertical = 5.dp)) {
-                Box(Modifier.size(6.dp).clip(RoundedCornerShape(999.dp))
-                    .background(if (running) T.Good else T.Faint))
-                Spacer(Modifier.width(6.dp))
-                Text(if (running) "COLLECTING" else "STOPPED",
-                    color = if (running) T.Good else T.Faint, fontSize = 9.sp,
-                    fontFamily = Mono, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Row(verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.clip(RoundedCornerShape(999.dp))
+                        .background((if (running) T.Good else T.Faint).copy(alpha = 0.10f))
+                        .border(1.dp, (if (running) T.Good else T.Faint).copy(alpha = 0.28f),
+                            RoundedCornerShape(999.dp))
+                        .clickableNoRipple(onToggle)
+                        .padding(horizontal = 9.dp, vertical = 5.dp)) {
+                    Box(Modifier.size(6.dp).clip(RoundedCornerShape(999.dp))
+                        .background(if (running) T.Good else T.Faint))
+                    Spacer(Modifier.width(6.dp))
+                    Text(if (running) "COLLECTING" else "STOPPED",
+                        color = if (running) T.Good else T.Faint, fontSize = 9.sp,
+                        fontFamily = Mono, fontWeight = FontWeight.Bold, letterSpacing = 0.9.sp)
+                }
+                Spacer(Modifier.width(10.dp))
+                Icon(
+                    Icons.Filled.Settings, contentDescription = "Settings",
+                    tint = if (tab == Tab.SETTINGS) T.Brand else T.Faint,
+                    modifier = Modifier.size(22.dp).clickableNoRipple(onSettings)
+                )
             }
             Spacer(Modifier.height(3.dp))
             Text("${c.radioRows}·${c.regRows}·${c.linkRows} rows",
                 color = T.Faint, fontSize = 9.sp, fontFamily = Mono)
         }
-        Spacer(Modifier.width(10.dp))
-        Icon(
-            Icons.Filled.Settings, contentDescription = "Settings",
-            tint = if (tab == Tab.SETTINGS) T.Brand else T.Faint,
-            modifier = Modifier.size(22.dp).clickableNoRipple(onSettings)
-        )
     }
 }
 
