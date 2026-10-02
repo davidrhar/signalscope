@@ -32,6 +32,21 @@ object SiteAggregator {
 
     private const val PREFS = "site_agg"
     private const val KEY_MARK = "watermark_wall"
+    private const val KEY_VER = "fold_version"
+
+    /**
+     * Bumped whenever a change alters which rows the fold counts or how it counts them.
+     *
+     * The record is a running total, so a corrected rule cannot be applied to it -- only to rows
+     * not yet read, which leaves a total that is part right and part wrong and no way to tell
+     * which part. Clearing it and folding again from the start is the only honest answer, and it
+     * costs nothing but the catch-up: the raw rows are still there.
+     *
+     * 2: counts a reading as LTE by the SERVING CELL's technology, not by whichever bearer was
+     *    carrying data. Version 1 read `rat` and so discarded every reading taken while Wi-Fi
+     *    calling was up, each of which had a perfectly usable LTE cell id on it.
+     */
+    private const val FOLD_VERSION = 2
 
     private const val EVERY_MS = 10 * 60_000L
     private const val DAY_MS = 86_400_000L
@@ -57,8 +72,16 @@ object SiteAggregator {
     /** @return rows folded. */
     suspend fun fold(ctx: Context): Int = runCatching {
         val prefs = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-        val mark = prefs.getLong(KEY_MARK, 0L)
         val dao = Db.get(ctx).dao()
+
+        if (prefs.getInt(KEY_VER, 1) != FOLD_VERSION) {
+            runCatching {
+                Db.get(ctx).openHelper.writableDatabase.execSQL("DELETE FROM `site_stat`")
+            }
+            prefs.edit().remove(KEY_MARK).putInt(KEY_VER, FOLD_VERSION).apply()
+        }
+
+        val mark = prefs.getLong(KEY_MARK, 0L)
         val db = Db.get(ctx).openHelper.readableDatabase
 
         // (plmn, site, hour) -> running totals for this pass.
@@ -67,7 +90,7 @@ object SiteAggregator {
         var read = 0
 
         db.query(
-            "SELECT wallMillis, servingCi, rssnr, rsrq, mcc, mnc, rat FROM radio_sample " +
+            "SELECT wallMillis, servingCi, rssnr, rsrq, mcc, mnc, rat, cellRat FROM radio_sample " +
                 "WHERE wallMillis > $mark ORDER BY wallMillis ASC LIMIT $BATCH"
         ).use { c ->
             val cal = java.util.Calendar.getInstance()
@@ -76,7 +99,16 @@ object SiteAggregator {
                 val wall = c.getLong(0)
                 if (wall > maxWall) maxWall = wall
                 if (c.isNull(1) || c.isNull(2)) continue
-                val rat = if (c.isNull(6)) "" else c.getString(6)
+                // cellRat is the SERVING CELL's technology; rat is whichever bearer was carrying
+                // data, which reads IWLAN whenever Wi-Fi calling is up. Keying a mast record on
+                // the latter dropped every reading taken over Wi-Fi calling even though each one
+                // had a usable LTE cell id attached. rat is the fallback only for rows written
+                // before cellRat existed as a column.
+                val rat = when {
+                    !c.isNull(7) -> c.getString(7)
+                    !c.isNull(6) -> c.getString(6)
+                    else -> ""
+                }
                 // LTE only: NR packs the gNB-ID with a configurable length, so site and sector
                 // cannot be separated from the identity alone and are not guessed at.
                 if (!rat.startsWith("LTE")) continue
@@ -152,7 +184,8 @@ object SiteAggregator {
 
     /** Forget every mast's record, and start the fold again from nothing. */
     fun forget(ctx: Context) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_MARK).apply()
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+            .remove(KEY_MARK).putInt(KEY_VER, FOLD_VERSION).apply()
     }
 
     private class Acc {

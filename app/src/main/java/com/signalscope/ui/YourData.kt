@@ -19,6 +19,7 @@ import com.signalscope.collect.CollectorService
 import com.signalscope.collect.FixBuffer
 import com.signalscope.store.Db
 import com.signalscope.store.Export
+import com.signalscope.store.Networks
 import com.signalscope.store.SiteAggregator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -128,6 +129,9 @@ private suspend fun wipe(ctx: Context) {
     // The mast record is a standing total that outlives the rows it was built from, so emptying
     // radio_sample does not empty it. Its watermark goes too, or the fold would resume mid-history.
     runCatching { SiteAggregator.forget(ctx) }
+    // Learned operator names are a record of which countries the phone has registered in, which
+    // is exactly the kind of thing someone pressing this button means to be rid of.
+    runCatching { Networks.forgetLearned(ctx) }
     runCatching { ctx.filesDir.resolve("rollup").deleteRecursively() }
     runCatching { ctx.filesDir.resolve("export").deleteRecursively() }
     Consent.revoke(ctx)

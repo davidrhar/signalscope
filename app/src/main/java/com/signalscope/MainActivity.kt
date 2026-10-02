@@ -41,6 +41,7 @@ private val Mono = FontFamily.Monospace
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
+        runCatching { com.signalscope.store.Networks.prime(this) }
         // Targeting SDK 35+ makes the window edge-to-edge whether we ask or not, so declare it
         // and pick light system-bar icons for the dark surface. Insets are consumed below;
         // without that, content sits under the status bar and behind the navigation bar.

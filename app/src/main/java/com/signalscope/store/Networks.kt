@@ -24,6 +24,78 @@ package com.signalscope.store
  */
 object Networks {
 
+    private const val PREFS = "plmn_names"
+
+    /**
+     * Names the modem itself reported for networks this phone has registered on.
+     *
+     * A hand-written table can only ever name networks someone thought to add, which is the wrong
+     * set: the networks that matter are the ones this phone actually used, and on a phone that
+     * travels those are unknowable in advance. Every ServiceState carries the registered
+     * operator's numeric code AND its name, so the device is already being told the answer -- this
+     * just stops throwing it away. It is learned, not looked up, so it costs no network call, no
+     * shipped table, and nothing to keep current.
+     *
+     * Curated entries still win. A learned name comes from a carrier's own configuration and can
+     * be a brand, a sub-brand, or an abbreviation that varies by handset; where this project has
+     * checked a code against a public reference, that answer is the better one.
+     */
+    private val learned = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Load what has been learned before. Cheap, and safe to call more than once. */
+    fun prime(ctx: android.content.Context) {
+        runCatching {
+            ctx.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).all
+                .forEach { (k, v) -> (v as? String)?.takeIf { it.isNotBlank() }?.let { learned[k] = it } }
+        }
+    }
+
+    /** Drop every learned name. Part of "delete everything collected". */
+    fun forgetLearned(ctx: android.content.Context) {
+        learned.clear()
+        runCatching {
+            ctx.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+                .edit().clear().apply()
+        }
+    }
+
+    /**
+     * Record what the network called itself, if it is worth recording.
+     *
+     * The guard that matters is [simName]. A carrier can configure the handset to keep showing its
+     * own name while the phone is on somebody else's network -- so a reported name identical to
+     * the SIM's own, on a network that is not the SIM's own, is the signature of that override
+     * rather than a fact about the visited operator. Learning it would relabel every foreign
+     * network with the home one's name, which is worse than a bare code: a code says nothing,
+     * a wrong name says something false.
+     */
+    fun learn(
+        ctx: android.content.Context,
+        plmn: String?,
+        reported: String?,
+        simPlmn: String? = null,
+        simName: String? = null
+    ) {
+        val p = plmn?.trim().orEmpty()
+        val n = reported?.trim().orEmpty()
+        if (!p.contains('-') || n.isEmpty()) return
+        // A modem with nothing to say often says the numeric code, or the code with a space in it.
+        if (n.length > 32 || n.all { it.isDigit() || it == '-' || it == ' ' }) return
+        if (n.equals(p, true)) return
+        val key = normalise(p)
+        if (NAMES.containsKey(key)) return
+        // The roaming display-name override, described above.
+        if (simName != null && n.equals(simName.trim(), true) &&
+            simPlmn != null && normalise(simPlmn.trim()) != key
+        ) return
+        if (learned[key] == n) return
+        learned[key] = n
+        runCatching {
+            ctx.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE)
+                .edit().putString(key, n).apply()
+        }
+    }
+
     private val RAW: Map<String, String> = mapOf(
         // Singapore
         "525-01" to "Singtel",
@@ -54,12 +126,13 @@ object Networks {
     fun name(plmn: String?): String {
         val p = plmn?.trim().orEmpty()
         if (p.isEmpty() || p == "—" || p == "?-?") return "unknown network"
-        return NAMES[normalise(p)] ?: p
+        val key = normalise(p)
+        return NAMES[key] ?: learned[key] ?: p
     }
 
     /** True when [name] would return something other than the code. */
     fun isKnown(plmn: String?): Boolean =
-        plmn != null && NAMES.containsKey(normalise(plmn))
+        plmn != null && normalise(plmn).let { NAMES.containsKey(it) || learned.containsKey(it) }
 
     /**
      * A band label as a person should read it.

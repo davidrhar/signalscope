@@ -36,6 +36,7 @@ class CollectorService : LifecycleService() {
 
     override fun onCreate() {
         super.onCreate()
+        runCatching { com.signalscope.store.Networks.prime(this) }
 
         // Declaring only the `location` FGS type made startForeground() throw a
         // SecurityException whenever location permission was not yet granted -- which is

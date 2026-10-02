@@ -389,7 +389,45 @@ class TelephonyCollector(
             write(subId, "event", sig, act)
         }
 
-        override fun onServiceStateChanged(state: ServiceState) {
+        override fun onServiceStateChanged(state: ServiceState) = applyServiceState(subId, state)
+
+        override fun onDisplayInfoChanged(info: TelephonyDisplayInfo) {
+            LiveState.updateSim(subId) {
+                it.copy(
+                    rat = ratName(info.networkType),
+                    overrideNetwork = overrideName(info.overrideNetworkType)
+                )
+            }
+        }
+
+        override fun onDataConnectionStateChanged(state: Int, networkType: Int) {
+            LiveState.updateSim(subId) { it.copy(rat = ratName(networkType)) }
+        }
+
+        override fun onDataActivity(direction: Int) {
+            LiveState.updateSim(subId) { it.copy(dataActivity = direction) }
+        }
+
+        override fun onCellInfoChanged(cellInfo: MutableList<CellInfo>) {
+            runCatching { LiveState.updateSim(subId) { applyServing(it, cellInfo) } }
+            recordNeighbours(subId, cellInfo)
+        }
+    }
+
+    /**
+     * Apply a ServiceState from either the callback or the poll -- one function, for the same
+     * reason [applyServing] is one: two paths that drift apart are worse than one that is wrong.
+     *
+     * ## Why the poll needs to reach this at all
+     *
+     * Registration, RAT and the override network are push-only. The platform is meant to deliver
+     * the current ServiceState when a callback registers, and when it does not -- observed on a
+     * fresh process start, with signal strength and cell info both arriving normally -- the app has
+     * no registration data at all and no way to notice, because silence from an event-driven
+     * source is indistinguishable from nothing having changed. The two sources that were never
+     * blank are exactly the two that already had a pull fallback. This gives the third one.
+     */
+    private fun applyServiceState(subId: Int, state: ServiceState) {
             // getNetworkRegistrationInfo(domain, transport) is @SystemApi; the list accessor
             // is the public one. Domain is a bitmask, so test with `and`.
             val regs = runCatching { state.networkRegistrationInfoList }.getOrDefault(emptyList())
@@ -427,6 +465,19 @@ class TelephonyCollector(
             // band invalidates them, which is the property that was wanted in the first place.
             val channel = runCatching { state.channelNumber }.getOrNull()
                 ?.takeIf { it > 0 && it != Int.MAX_VALUE }
+
+            // The registered operator names itself here, beside its numeric code. Keeping the pair
+            // is how a network in a country nobody thought to put in a table ends up with a name.
+            runCatching {
+                val prior = LiveState.sims.value[subId]
+                com.signalscope.store.Networks.learn(
+                    ctx,
+                    plmn = numericToPlmn(state.operatorNumeric),
+                    reported = state.operatorAlphaLong ?: state.operatorAlphaShort,
+                    simPlmn = prior?.simPlmn,
+                    simName = prior?.carrier
+                )
+            }
             LiveState.updateSim(subId) {
                 val (bw, bwArfcn) = when {
                     state.state != ServiceState.STATE_IN_SERVICE -> null to null
@@ -494,29 +545,6 @@ class TelephonyCollector(
                 }
                 runCatching { bumpCounters() }
             }
-        }
-
-        override fun onDisplayInfoChanged(info: TelephonyDisplayInfo) {
-            LiveState.updateSim(subId) {
-                it.copy(
-                    rat = ratName(info.networkType),
-                    overrideNetwork = overrideName(info.overrideNetworkType)
-                )
-            }
-        }
-
-        override fun onDataConnectionStateChanged(state: Int, networkType: Int) {
-            LiveState.updateSim(subId) { it.copy(rat = ratName(networkType)) }
-        }
-
-        override fun onDataActivity(direction: Int) {
-            LiveState.updateSim(subId) { it.copy(dataActivity = direction) }
-        }
-
-        override fun onCellInfoChanged(cellInfo: MutableList<CellInfo>) {
-            runCatching { LiveState.updateSim(subId) { applyServing(it, cellInfo) } }
-            recordNeighbours(subId, cellInfo)
-        }
     }
 
     // ------------------------------------------------------------------------------------------
@@ -625,8 +653,37 @@ class TelephonyCollector(
         tick++
         for (subId in subs) {
             val tm = tmFor(subId) ?: continue
-            // Only supplement. If the push stream is alive, adding polled rows would double-count
-            // and distort every rate we derive from row density.
+            // Registration and RAT come BEFORE the freshness check below, because that check is
+            // the signal stream's and these are different streams that go quiet independently.
+            // The failure this exists for is precisely signal arriving normally while
+            // registration never does, so gating it on a stale signal would skip it every time.
+            //
+            // Re-applying an unchanged ServiceState writes nothing: lastRegSig already drops
+            // identical rows, which is what makes pulling this safe to repeat.
+            if (LiveState.sims.value[subId]?.serviceStale(30_000) != false) {
+                runCatching { tm.serviceState }.getOrNull()
+                    ?.let { runCatching { applyServiceState(subId, it) } }
+            }
+
+            // The RAT is push-only too -- onDisplayInfoChanged and onDataConnectionStateChanged
+            // are the only sources -- so without this the card reads "—" for as long as neither
+            // fires, which on the start that prompted all of this was indefinitely.
+            //
+            // The serving cell's own RAT first. getDataNetworkType() answers a different question,
+            // namely which bearer is carrying data, and while Wi-Fi calling is up it answers
+            // IWLAN -- true, and wrong as a heading for a card whose every other number came off
+            // an LTE cell. It is kept as the last resort, with that answer excluded.
+            val prior = LiveState.sims.value[subId]
+            if (prior?.rat.let { it == null || it == "—" }) {
+                val r = prior?.cellRat
+                    ?: runCatching { ratName(tm.dataNetworkType) }.getOrNull()
+                        ?.takeIf { it != "—" && it != "IWLAN" && it != "UNKNOWN" }
+                if (r != null) LiveState.updateSim(subId) { it.copy(rat = r) }
+            }
+
+            // Only supplement. If the push stream is alive, adding polled ROWS would double-count
+            // and distort every rate we derive from row density. This guards the writes below it,
+            // not the two reads above, which write nothing new when nothing has changed.
             val fresh = LiveState.sims.value[subId]?.signalStale(8_000) == false
             if (fresh) continue
 

@@ -39,8 +39,12 @@ fun SiteCard(s: SimState) {
 
     // Recomputed when the serving cell changes, not on every frame: it is a scan of up to a
     // month of rows and the answer cannot change while the phone stays on one cell.
-    LaunchedEffect(s.ci, s.rat, s.plmn) {
-        verdict = SiteHistory.forCell(ctx, s.ci, s.rat, s.plmn)
+    // cellRat, to match what the record is built on. s.rat is whichever bearer carries data and
+    // reads IWLAN while Wi-Fi calling is up, which would have made this card go quiet in exactly
+    // the condition where the cellular leg is worth warning about.
+    val rat = s.cellRat ?: s.rat
+    LaunchedEffect(s.ci, rat, s.plmn) {
+        verdict = SiteHistory.forCell(ctx, s.ci, rat, s.plmn)
     }
 
     val v = verdict ?: return
