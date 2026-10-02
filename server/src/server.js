@@ -59,6 +59,15 @@ async function bundlePaths() {
   return out;
 }
 
+/** Delete every stored bundle whose file name is one of [names], in any day folder. */
+async function removeBundles(names) {
+  if (!names.size) return;
+  for (const p of await bundlePaths()) {
+    const base = p.slice(p.lastIndexOf('/') + 1, -'.json'.length);
+    if (names.has(base)) await rm(p, { force: true });
+  }
+}
+
 async function rebuild() {
   // One at a time. Two concurrent rebuilds would both read the same raw set and race on the
   // write, and the loser's work is wasted rather than wrong -- but the expiry below deletes, so
@@ -149,11 +158,36 @@ createServer(async (req, res) => {
       if (doc?.format !== 'signalscope-contribution') return send(res, 400, { error: 'wrong format' });
       if (!Array.isArray(doc.records)) return send(res, 400, { error: 'no records' });
 
-      // Random name, date-prefixed only so expiry can work by age. Nothing about the sender goes
-      // into it, so two bundles from one phone are no more linkable here than in the app.
+      /*
+       * One file per submission id, so one phone is one contributor.
+       *
+       * A bundle is the sender's whole history, re-sent daily. Storing each arrival separately
+       * and counting one contributor per file meant a single phone uploading for five days became
+       * five contributors for every area it had measured -- clearing the floor of three alone and
+       * multiplying every sample count by five. The floor that decides what the world sees was
+       * not, in practice, being applied.
+       *
+       * The id names a sequence of uploads and nothing else: the client mints it from 128 random
+       * bits, rotates it quarterly, and never derives it from anything about the device. A bundle
+       * without one keeps the old behaviour and gets a random name -- that is the hand-exported
+       * file, submitted rarely, and treating it as its own contributor is the safe way to be
+       * wrong about it.
+       */
+      const id = /^[a-f0-9]{32}$/.test(doc.submission ?? '') ? doc.submission : randomUUID();
+      const retire = /^[a-f0-9]{32}$/.test(doc.retire ?? '') ? doc.retire : null;
+
+      // The id is the file's identity, not the day it arrived, so a re-upload must displace the
+      // earlier one wherever it is filed. Deleting first also means a crash between the two leaves
+      // this phone uncounted for one cycle rather than counted twice, which is the better failure.
+      await removeBundles(new Set([id, retire].filter(Boolean)));
+
+      // Day folder only so expiry can work by age; the file's mtime is its last upload.
       const day = new Date().toISOString().slice(0, 10);
       await mkdir(join(RAW, day), { recursive: true });
-      await writeFile(join(RAW, day, `${randomUUID()}.json`), JSON.stringify(doc));
+      // The id does not go into storage. It names the file so the next upload can replace it,
+      // and is stripped from the contents so a stored bundle holds nothing about its sender.
+      const { submission, retire: _retire, ...stored } = doc;
+      await writeFile(join(RAW, day, `${id}.json`), JSON.stringify(stored));
 
       rebuild().catch(() => {});   // not awaited: the contributor should not wait for a merge
       return send(res, 200, { ok: true, records: doc.records.length });

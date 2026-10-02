@@ -80,6 +80,17 @@ object Uploader {
             ShareConsent.clearError(ctx)
             return false
         }
+        // The id goes on here rather than in Contribution.build, so an exported bundle -- the file
+        // someone may hand on or post -- stays free of it. Only the wire to our own endpoint
+        // carries it.
+        val ticket = Submission.ticket(ctx)
+        val wire = runCatching {
+            org.json.JSONObject(body).apply {
+                put("submission", ticket.id)
+                ticket.retire?.let { put("retire", it) }
+            }.toString()
+        }.getOrDefault(body)
+
         return runCatching {
             val c = (URL(ENDPOINT).openConnection() as HttpURLConnection).apply {
                 requestMethod = "POST"
@@ -89,10 +100,11 @@ object Uploader {
                 setRequestProperty("Content-Type", "application/json")
             }
             try {
-                c.outputStream.use { it.write(body.toByteArray()) }
+                c.outputStream.use { it.write(wire.toByteArray()) }
                 val code = c.responseCode
                 if (code in 200..299) {
                     ShareConsent.noteUpload(ctx, System.currentTimeMillis())
+                    Submission.confirm(ctx)
                     true
                 } else {
                     ShareConsent.noteError(ctx, "server said $code")

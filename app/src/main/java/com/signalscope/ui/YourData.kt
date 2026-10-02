@@ -21,6 +21,7 @@ import com.signalscope.store.Db
 import com.signalscope.store.Export
 import com.signalscope.store.Networks
 import com.signalscope.store.SiteAggregator
+import com.signalscope.store.Submission
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -132,6 +133,7 @@ private suspend fun wipe(ctx: Context) {
     // Learned operator names are a record of which countries the phone has registered in, which
     // is exactly the kind of thing someone pressing this button means to be rid of.
     runCatching { Networks.forgetLearned(ctx) }
+    runCatching { Submission.forget(ctx) }
     runCatching { ctx.filesDir.resolve("rollup").deleteRecursively() }
     runCatching { ctx.filesDir.resolve("export").deleteRecursively() }
     Consent.revoke(ctx)

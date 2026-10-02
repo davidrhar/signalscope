@@ -101,8 +101,11 @@ fun ContributePanel() {
         Spacer(Modifier.height(9.dp))
         Text(
             "Summaries per area, per network, per band. No exact locations, no times of day, no " +
-                "mast identities, no device identifier and no account. An area only ever appears " +
-                "on the shared map once three different people have measured it.",
+                "mast identities and no account. One random number goes with it, so the server " +
+                "can tell that today's contribution replaces yesterday's instead of counting you " +
+                "twice; it is not derived from your phone and it changes every three months. An " +
+                "area only ever appears on the shared map once three different phones have " +
+                "measured it.",
             color = T.Faint, fontSize = 11.5.sp, lineHeight = 16.sp
         )
 

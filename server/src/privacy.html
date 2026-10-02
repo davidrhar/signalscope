@@ -75,8 +75,12 @@
     <td>Our server, <code>signalscope-map.fly.dev</code>, hosted by Fly.io in Singapore</td>
     <td>A summary of signal quality per area (about 460 m across), mobile network and band, dated
       only to the week. It contains <strong>no</strong> exact location, no serving-mast identities,
-      no times of day, and no device, account or installation identifier. Automatic contributions are
-      sent at most once a day and only over Wi-Fi or another unmetered connection.</td>
+      no times of day, and no account, no device identifier and nothing derived from your hardware.
+      It does carry one random number, generated on your phone, which lets our server recognise
+      that a later contribution replaces your earlier one rather than adding to it &mdash; see
+      <a href="#why-a-number">why below</a>. It changes every three months and is destroyed when
+      you delete your data. Automatic contributions are sent at most once a day and only over
+      Wi-Fi or another unmetered connection.</td>
   </tr>
   <tr>
     <td>Connection and speed tests</td>
@@ -100,16 +104,33 @@
 </table>
 <p>
   Like any internet service, these providers see your device's IP address when your phone connects to
-  them. Our own server does not record IP addresses, set cookies or assign identifiers to contributions.
+  them. Our own server does not record IP addresses, set cookies, or assign you any identifier.
 </p>
 
 <h2>How we use shared contributions</h2>
 <p>
   Contributions are combined with those from other phones to build a public map comparing mobile
-  network coverage across areas. An area is published only once at least three separate contributions
+  network coverage across areas. An area is published only once at least three separate phones
   cover it. Contributions are kept as received for up to 30 days and then deleted, leaving only the
-  combined map. Because contributions carry no identifier, they cannot be linked to you or to each
-  other, and we cannot pick out any one person's contribution.
+  combined map. Nothing in a contribution identifies you: there is no account, no device identifier
+  and no location in it, and we cannot connect one to a person.
+</p>
+
+<h2 id="why-a-number">Why a contribution carries a random number</h2>
+<p>
+  Each contribution is a summary of everything your phone has measured so far, sent again each day
+  rather than only the new part. Without something to recognise it by, our server would treat
+  yesterday's contribution and today's as coming from two different people &mdash; and after three
+  days your phone alone would satisfy the rule that three phones must cover an area before it is
+  published. The rule would still be printed on this page and would no longer be doing anything.
+</p>
+<p>
+  So each installation generates one random number for itself. It is not derived from your phone,
+  your SIM or anything about you, and it is not an account: it tells us only that two contributions
+  came from the same installation, which is what lets the newer one replace the older. It changes
+  every three months, it is never stored alongside a contribution once that contribution is filed,
+  and deleting your data on the app's Settings screen discards it, after which your phone is one we
+  have never seen.
 </p>
 <p>
   We do not sell data, and we do not use it for advertising or profiling.
