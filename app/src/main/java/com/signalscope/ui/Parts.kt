@@ -262,3 +262,20 @@ fun RawReport(label: String, text: String) {
         }
     }
 }
+
+/** Full-width button; [ghost] is the secondary style. */
+@Composable
+fun Btn(text: String, ghost: Boolean = false, onClick: () -> Unit) {
+    Box(
+        Modifier.fillMaxWidth()
+            .clip(RoundedCornerShape(11.dp))
+            .background(if (ghost) T.Surface2 else T.Brand)
+            .border(1.dp, if (ghost) T.Line else Color.Transparent, RoundedCornerShape(11.dp))
+            .clickableNoRipple(onClick)
+            .padding(vertical = 11.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(text, color = if (ghost) T.Text else Color(0xFF05192E), fontSize = 13.sp,
+            fontWeight = FontWeight.SemiBold)
+    }
+}

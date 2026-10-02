@@ -5,6 +5,7 @@ import android.graphics.Color as AndroidColor
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -63,6 +64,10 @@ private fun Root() {
     val profile by LiveState.profile.collectAsStateWithLifecycle()
 
     var tab by remember { mutableStateOf(Tab.LIVE) }
+    // Where the gear was pressed from, so back and the gear itself return there.
+    var beforeSettings by remember { mutableStateOf(Tab.LIVE) }
+    var mapOpensShare by remember { mutableStateOf(false) }
+    BackHandler(enabled = tab == Tab.SETTINGS) { tab = beforeSettings }
     var selected by remember { mutableStateOf<Int?>(null) }
     val ordered = sims.values.sortedBy { it.slot }
     val active = ordered.firstOrNull { it.subId == selected } ?: ordered.firstOrNull()
@@ -108,9 +113,14 @@ private fun Root() {
         Modifier.fillMaxSize().background(T.Page)
             .windowInsetsPadding(WindowInsets.safeDrawing)
     ) {
-        AppHead(tab, active, running, counters) {
-            if (running) CollectorService.stop(ctx) else CollectorService.start(ctx)
-        }
+        AppHead(
+            tab, active, running, counters,
+            onToggle = { if (running) CollectorService.stop(ctx) else CollectorService.start(ctx) },
+            onSettings = {
+                if (tab == Tab.SETTINGS) tab = beforeSettings
+                else { beforeSettings = tab; tab = Tab.SETTINGS }
+            }
+        )
 
         degraded?.let { msg ->
             Row(
@@ -129,12 +139,17 @@ private fun Root() {
             Box(Modifier.weight(1f)) {
                 when (tab) {
                     Tab.TIMELINE -> TimelineScreen()
-                    Tab.MAP -> MapScreen()
-                    Tab.ACTIONS -> ActionsScreen()
+                    // Keyed so that arriving from Settings' sharing row opens the share panel
+                    // even when the map was already composed with it closed.
+                    Tab.MAP -> key(mapOpensShare) { MapScreen(openShare = mapOpensShare) }
+                    Tab.DIAGNOSIS -> DiagnosisScreen()
+                    Tab.SETTINGS -> SettingsScreen(onOpenSharing = {
+                        mapOpensShare = true; tab = Tab.MAP
+                    })
                     else -> {}
                 }
             }
-            BottomNav(tab) { tab = it }
+            BottomNav(tab) { mapOpensShare = false; tab = it }
             return@Column
         }
 
@@ -180,12 +195,15 @@ private fun Root() {
             Spacer(Modifier.height(18.dp))
         }
 
-        BottomNav(tab) { tab = it }
+        BottomNav(tab) { mapOpensShare = false; tab = it }
     }
 }
 
 @Composable
-private fun AppHead(tab: Tab, s: SimState?, running: Boolean, c: Counters, onToggle: () -> Unit) {
+private fun AppHead(
+    tab: Tab, s: SimState?, running: Boolean, c: Counters,
+    onToggle: () -> Unit, onSettings: () -> Unit
+) {
     Row(
         Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 12.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -225,6 +243,12 @@ private fun AppHead(tab: Tab, s: SimState?, running: Boolean, c: Counters, onTog
             Text("${c.radioRows}·${c.regRows}·${c.linkRows} rows",
                 color = T.Faint, fontSize = 9.sp, fontFamily = Mono)
         }
+        Spacer(Modifier.width(10.dp))
+        Icon(
+            Icons.Filled.Settings, contentDescription = "Settings",
+            tint = if (tab == Tab.SETTINGS) T.Brand else T.Faint,
+            modifier = Modifier.size(22.dp).clickableNoRipple(onSettings)
+        )
     }
 }
 
@@ -419,7 +443,7 @@ private fun BottomNav(current: Tab, onSelect: (Tab) -> Unit) {
         NavItem(Tab.LIVE, Icons.Filled.PlayArrow, current, onSelect)
         NavItem(Tab.TIMELINE, Icons.Filled.List, current, onSelect)
         NavItem(Tab.MAP, Icons.Filled.Place, current, onSelect)
-        NavItem(Tab.ACTIONS, Icons.Filled.Settings, current, onSelect)
+        NavItem(Tab.DIAGNOSIS, Icons.Filled.Search, current, onSelect)
     }
 }
 

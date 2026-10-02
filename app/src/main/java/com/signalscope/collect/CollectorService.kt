@@ -88,7 +88,7 @@ class CollectorService : LifecycleService() {
         // to an app, so this benefits Teams and YouTube as much as us -- and it is gated off
         // entirely while Wi-Fi carries the default route, where it would be pure battery cost.
         runCatching { BearerWarmth.start(this, io) }
-        // Started here as well as from the Actions screen: warmth's call and media triggers read
+        // Started here as well as from the Diagnosis screen: warmth's call and media triggers read
         // this classifier, and until now it only ran while that screen was composed -- so in the
         // background it had zero samples and reported UNKNOWN, which is not evidence of no call.
         runCatching { ActionTraffic.start(this) }

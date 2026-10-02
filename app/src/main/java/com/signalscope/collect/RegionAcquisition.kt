@@ -12,6 +12,7 @@ import android.net.NetworkCapabilities
 import android.os.BatteryManager
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
+import com.signalscope.store.MapDataPolicy
 import com.signalscope.store.RegionBoxes
 import com.signalscope.store.RegionStore
 import kotlinx.coroutines.CoroutineScope
@@ -66,17 +67,17 @@ import kotlin.math.floor
  * It is still someone else's bandwidth, so: the archive is fetched **once per region and never
  * again**, the client identifies itself in `User-Agent`, the request count per region is bounded
  * and merged into as few ranges as possible, 429 and 5xx back off exponentially and then give up,
- * and nothing is fetched at all unless the phone is on unmetered Wi-Fi. At any real install base
- * the right answer is to mirror the planet ourselves and change one constant — that is the whole
- * change, and it is written down in `docs/region-acquisition.md`.
+ * and nothing is fetched on cellular unless the user has allowed it in [MapDataPolicy]. At any
+ * real install base the right answer is to mirror the planet ourselves and change one constant —
+ * that is the whole change, and it is written down in `docs/region-acquisition.md`.
  *
  * ## Unattended, gated on conditions rather than on prompts
  *
  * `map-regions.md`: the user is *informed, never asked*. Nothing here prompts. A download that
  * cannot run is **queued, not failed**, and the Map tab says what it is waiting for. Gating on
- * unmetered transport is what makes the silence safe: the failure a prompt would guard against —
- * an unexpected 40 MB on a foreign cellular plan — is structurally excluded rather than delegated
- * to the user.
+ * unmetered transport by default is what makes the silence safe: the failure a prompt would guard
+ * against — an unexpected 40 MB on a foreign cellular plan — is excluded unless the user has
+ * chosen, once, in Settings, to trade those bytes for not waiting until Wi-Fi.
  */
 object RegionAcquisition {
 
@@ -125,11 +126,28 @@ object RegionAcquisition {
         val transport: String,
         val batteryPct: Int,
         val charging: Boolean,
-        val freeBytes: Long
+        val freeBytes: Long,
+        val cellular: Boolean = false,
+        val roaming: Boolean = false,
+        val allow: MapDataPolicy.Allow = MapDataPolicy.Allow.WIFI_ONLY
     ) {
+        /**
+         * Whether the network, on its own, permits a download. Unmetered Wi-Fi always does;
+         * cellular only as far as [MapDataPolicy] has been widened by the user.
+         */
+        val networkAllowed: Boolean get() = unmetered || (cellular && when (allow) {
+            MapDataPolicy.Allow.WIFI_ONLY -> false
+            MapDataPolicy.Allow.MOBILE_HOME -> !roaming
+            MapDataPolicy.Allow.MOBILE_ROAMING -> true
+        })
+
         /** Null means go. Anything else is a reason to wait, never a reason to ask. */
         fun blocking(need: Long): String? = when {
-            !unmetered -> "waiting for unmetered Wi-Fi — on $transport now"
+            !networkAllowed -> when {
+                cellular && roaming && allow == MapDataPolicy.Allow.MOBILE_HOME ->
+                    "waiting for Wi-Fi — roaming, and mobile data is allowed on the home network only"
+                else -> "waiting for unmetered Wi-Fi — on $transport now"
+            }
             batteryPct in 0 until BATTERY_FLOOR && !charging ->
                 "waiting for charge — battery $batteryPct%, floor $BATTERY_FLOOR%"
             freeBytes < RegionStore.RESERVE_BYTES + need ->
@@ -392,13 +410,7 @@ object RegionAcquisition {
             caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "ethernet"
             else -> "other"
         }
-        // NOT_METERED is the property that matters; the transport check keeps a metered hotspot
-        // that lies about itself from being treated as home Wi-Fi.
-        val unmetered = caps != null &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) &&
-            caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
-            (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
-                caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
+        val unmetered = unmeteredNow(caps)
 
         val batt = runCatching {
             val i: Intent? = ctx.registerReceiver(null, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
@@ -413,8 +425,44 @@ object RegionAcquisition {
         return Conditions(
             unmetered = unmetered, transport = transport,
             batteryPct = batt.first, charging = batt.second,
-            freeBytes = RegionStore.space(ctx).freeBytes
+            freeBytes = RegionStore.space(ctx).freeBytes,
+            cellular = cellularNow(caps),
+            roaming = caps != null &&
+                !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING),
+            allow = MapDataPolicy.get(ctx)
         )
+    }
+
+    /**
+     * NOT_METERED is the property that matters; the transport check keeps a cellular bearer that
+     * reports itself unmetered from counting as Wi-Fi. It does not catch a travel router or a
+     * phone hotspot that fails to advertise itself as metered — to Android that is ordinary Wi-Fi.
+     */
+    private fun unmeteredNow(caps: NetworkCapabilities?): Boolean = caps != null &&
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED) &&
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) &&
+        (caps.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) ||
+            caps.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET))
+
+    private fun cellularNow(caps: NetworkCapabilities?): Boolean = caps != null &&
+        caps.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) &&
+        caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+
+    /**
+     * The network half of [conditions], cheap enough to ask before every range request. A download
+     * that began on an allowed network stops if the phone moves onto one that is not — Wi-Fi lost
+     * to cellular, or a border crossed into roaming — rather than finishing on whatever carries it.
+     */
+    private fun networkStillAllowed(ctx: Context): Boolean {
+        val cm = ctx.getSystemService(ConnectivityManager::class.java)
+        val caps = runCatching { cm?.getNetworkCapabilities(cm.activeNetwork) }.getOrNull()
+            ?: return false
+        return Conditions(
+            unmetered = unmeteredNow(caps), transport = "", batteryPct = -1, charging = false,
+            freeBytes = 0, cellular = cellularNow(caps),
+            roaming = !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_ROAMING),
+            allow = MapDataPolicy.get(ctx)
+        ).networkAllowed
     }
 
     // ---------------------------------------------------------------- acquisition
@@ -428,13 +476,18 @@ object RegionAcquisition {
             active = job, progress = null, lastError = null, queue = queue.toList()
         )
         val dest = RegionStore.fileFor(ctx, job.file)
+        val via = if (conditions(ctx).unmetered) "on Wi-Fi" else "over mobile data"
+        var networkLost = false
         try {
             val cost = withContext(Dispatchers.IO) {
                 RegionPmtiles.extract(
                     url = PLANET_URL, dest = dest,
                     west = job.west, south = job.south, east = job.east, north = job.north,
                     minZ = job.minZoom, maxZ = job.maxZoom,
-                    cancelled = { cancelActive },
+                    cancelled = {
+                        if (!cancelActive && !networkStillAllowed(ctx)) networkLost = true
+                        cancelActive || networkLost
+                    },
                     onProgress = { p -> _state.value = _state.value.copy(progress = p) }
                 )
             }
@@ -457,12 +510,20 @@ object RegionAcquisition {
                 active = null, progress = null, lastResult = summary,
                 revision = _state.value.revision + 1
             )
-            notifyOnce(ctx, job, mb)
+            notifyOnce(ctx, job, mb, via)
         } catch (e: Throwable) {
             // Fail soft: requeue, back off, say what happened, change nothing else. Nothing
             // half-written is left behind — RegionPmtiles deletes its work file on any throw, and
             // it never had a name the renderer could reach in the first place.
             if (queue.none { it.id == job.id }) queue.add(job)
+            if (networkLost) {
+                // Not a failure: the network stopped qualifying. Back in the queue with no
+                // backoff, so it resumes the moment conditions allow, and no error to show.
+                _state.value = _state.value.copy(
+                    active = null, progress = null, queue = queue.toList()
+                )
+                return
+            }
             failed[job.id] = System.currentTimeMillis() + 15 * 60 * 1000L
             _state.value = _state.value.copy(
                 active = null, progress = null, queue = queue.toList(),
@@ -535,7 +596,7 @@ object RegionAcquisition {
     // ---------------------------------------------------------------- notification
 
     /** After the fact, once, never a question. `map-regions.md` is explicit about this. */
-    private fun notifyOnce(ctx: Context, job: Job, mb: Long) {
+    private fun notifyOnce(ctx: Context, job: Job, mb: Long, via: String) {
         runCatching {
             if (ctx.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
                 PackageManager.PERMISSION_GRANTED
@@ -548,7 +609,7 @@ object RegionAcquisition {
             val n = Notification.Builder(ctx, CHANNEL)
                 .setSmallIcon(android.R.drawable.stat_sys_download_done)
                 .setContentTitle("Map added: ${job.country?.let { RegionBoxes.name(it) } ?: job.label}")
-                .setContentText("${job.label} · $mb MB · downloaded on Wi-Fi")
+                .setContentText("${job.label} · $mb MB · downloaded $via")
                 .setAutoCancel(true)
                 .build()
             nm.notify(job.id.hashCode(), n)

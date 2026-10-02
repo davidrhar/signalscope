@@ -96,7 +96,9 @@ Conditions, checked before and during a download:
 | Condition | Behaviour |
 |---|---|
 | **Unmetered Wi-Fi** | Proceed |
-| Cellular, or metered Wi-Fi | **Defer** — queue and wait. Never prompt, never fetch |
+| Cellular, home network | **Defer** by default; proceed if Settings allows mobile data |
+| Cellular, roaming | **Defer** unless Settings explicitly allows roaming as well |
+| Metered Wi-Fi | **Defer** — queue and wait. Never prompt, never fetch |
 | Battery < 20 % and not charging | Defer until charging or recovered |
 | Storage below threshold | Defer, surface in the storage screen |
 
@@ -104,6 +106,14 @@ Gating on unmetered transport is what makes silence safe: the failure mode a pro
 protect against — an unexpected 40 MB on a foreign cellular plan — is structurally excluded
 rather than delegated to the user. A deferred download is not a failed one; it resumes when
 conditions allow, which on a phone is usually the same evening.
+
+That delay is the price, and some people would rather pay in bytes. So Settings → Map downloads
+offers **Wi-Fi only** (the default), **Wi-Fi and mobile data** (home network only), and **also when
+roaming**. Roaming is its own step because the same megabyte can cost orders of magnitude more
+abroad — and it cannot be folded into "never", because a SIM that roams full-time would then never
+qualify. The network is re-checked before every range request, so a download that started on an
+allowed network stops, and requeues without penalty, the moment the phone moves onto one that is
+not.
 
 The user is notified once per new country, after the fact ("map added for <country>, 38 MB"), and
 everything is visible and reversible in the storage screen. A setting can switch to

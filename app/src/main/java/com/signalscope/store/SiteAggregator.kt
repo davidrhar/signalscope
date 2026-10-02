@@ -127,6 +127,34 @@ object SiteAggregator {
         read
     }.getOrDefault(0)
 
+    /**
+     * What the mast record currently holds, and how far behind the fold is.
+     *
+     * Without this the feature is unobservable: a mast card that stays quiet looks identical
+     * whether the record is empty, still catching up, or simply says this mast is fine. That is
+     * fine for someone using the app and useless for anyone checking it works.
+     */
+    data class Status(val masts: Int, val slots: Int, val samples: Long, val behind: Long)
+
+    suspend fun status(ctx: Context): Status = runCatching {
+        val rows = Db.get(ctx).dao().allSiteStats()
+        val mark = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getLong(KEY_MARK, 0L)
+        val behind = Db.get(ctx).openHelper.readableDatabase
+            .query("SELECT COUNT(*) FROM radio_sample WHERE wallMillis > $mark")
+            .use { if (it.moveToFirst()) it.getLong(0) else 0L }
+        Status(
+            masts = rows.map { it.site }.distinct().size,
+            slots = rows.size,
+            samples = rows.sumOf { it.samples },
+            behind = behind
+        )
+    }.getOrDefault(Status(0, 0, 0L, 0L))
+
+    /** Forget every mast's record, and start the fold again from nothing. */
+    fun forget(ctx: Context) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().remove(KEY_MARK).apply()
+    }
+
     private class Acc {
         var samples = 0L
         var belowZero = 0L

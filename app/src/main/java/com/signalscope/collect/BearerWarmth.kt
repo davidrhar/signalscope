@@ -527,11 +527,11 @@ object BearerWarmth {
     /**
      * Prefers [ActionTraffic], read-only, because it already classifies exactly this and it has
      * positive evidence (audio mode, playback configurations, call state) rather than an inference.
-     * But it is only *started* by the Actions screen, so in a background service it usually has no
-     * samples at all — and an unsampled classifier reports UNKNOWN, which must never be read as
-     * "no call". So when it is not live, fall back to the two cheap platform reads it would have
-     * made. Nothing here is started or mutated; a missing service or a revoked permission degrades
-     * to "cannot tell", never to "nothing is happening".
+     * But it is only *started* by the Diagnosis and Settings screens, so in a background service it
+     * usually has no samples at all — and an unsampled classifier reports UNKNOWN, which must never
+     * be read as "no call". So when it is not live, fall back to the two cheap platform reads it
+     * would have made. Nothing here is started or mutated; a missing service or a revoked
+     * permission degrades to "cannot tell", never to "nothing is happening".
      */
     private fun readTraffic(ctx: Context): Traffic {
         val cs = runCatching { ActionTraffic.state.value }.getOrNull()

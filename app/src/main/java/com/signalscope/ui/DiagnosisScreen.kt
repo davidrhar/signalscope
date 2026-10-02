@@ -25,25 +25,25 @@ import kotlinx.coroutines.delay
 private val Mono = FontFamily.Monospace
 
 /**
- * Actions — remediation, honestly gated.
+ * Diagnosis — what is wrong, then what can be done about it, honestly gated.
  *
- * Two gates stand between a fault and a fix, and the screen's job is to make both visible:
- * **privilege** (Shizuku, which this build does not link) and **traffic** (what is running right
- * now, which decides whether the action would be invisible or catastrophic). A blocked action
- * always names which of the two is blocking it.
+ * The findings lead, because an action is only as good as the reason for it. The levers follow,
+ * and two gates stand between a fault and a fix: **privilege** (Shizuku, which this build does not
+ * link) and **traffic** (what is running right now, which decides whether the action would be
+ * invisible or catastrophic). A blocked action always names which of the two is blocking it.
  *
  * Nothing privileged executes from this screen. The gates are evaluated for real; execution stops
  * behind the Shizuku check. The Tier-0 deep links are wired properly, because opening a Settings
  * page costs no connectivity.
+ *
+ * How the app behaves, and the data it holds, are not here: they are in [SettingsScreen]. This
+ * screen is about the connection, not about the app.
  */
 @Composable
-fun ActionsScreen(modifier: Modifier = Modifier) {
+fun DiagnosisScreen(modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val traffic by ActionTraffic.state.collectAsStateWithLifecycle()
     val pending by ActionQueue.pending.collectAsStateWithLifecycle()
-    val log by ActionQueue.log.collectAsStateWithLifecycle()
-    val selfTest by ActionSelfTest.running.collectAsStateWithLifecycle()
-    val selfTestLabel by ActionSelfTest.runningLabel.collectAsStateWithLifecycle()
 
     val shizuku = remember { ActionPrivilege.probe(ctx) }
     val links = remember { ActionDeepLinks.resolve(ctx) }
@@ -64,54 +64,29 @@ fun ActionsScreen(modifier: Modifier = Modifier) {
         modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp)
     ) {
         // No title here. The nav shell already renders this screen's name and subtitle, the same
-        // way it does for every other tab, and drawing a second pair printed "Actions" twice.
-        // The improved subtitle moved to Nav.kt where the first one lives.
+        // way it does for every other tab.
 
-        // Sharing is not here. It lives on the Map tab, beside the map it contributes to, where
-        // the question "should I share this?" is actually asked. Having it in both places meant
-        // the same consent wording appeared twice on one screen's worth of scrolling, which makes
-        // a reader wonder which one is the real setting.
-        //
-        // Export and delete stay, because they are about the data on this phone rather than about
-        // the shared map, and they go first: they are the controls somebody arrives looking for
-        // rather than reads their way down to. A control nobody can find has not been provided.
-        YourDataPanel()
-
-        // The diagnosis leads the levers, because an action is only as good as the reason for it —
-        // and because these panels are the only place the app says, in plain words, what it found.
+        // These panels are the only place the app says, in plain words, what it found.
         DiagnosticPanels()
+
+        // Tier 0 before the disruptive levers: these always work, and cost nothing to try.
+        SecHead("What you can change", "tier 0 · these work")
+        Text(
+            "We cannot set any of these. We can put you one tap from the right page with the " +
+                    "evidence in hand. Opening a page costs no connectivity, so the traffic gate " +
+                    "does not apply.",
+            color = T.Faint, fontSize = 10.5.sp, lineHeight = 15.sp,
+            modifier = Modifier.padding(bottom = 7.dp)
+        )
+        links.forEach { l ->
+            LinkCard(l) { notice = ActionDeepLinks.open(ctx, l) ?: "Opened ${l.target}." }
+        }
 
         SecHead("Running now", "decides what may run")
         TrafficHero(traffic)
 
-        Spacer(Modifier.height(8.dp))
-        Btn(
-            if (selfTest > 0) "Self-test running — ${selfTest}s · $selfTestLabel"
-            else "Self-test · 10 s of silent MEDIA/MUSIC → safe window",
-            ghost = true
-        ) { ActionSelfTest.start(label = "MEDIA/MUSIC") }
-        Spacer(Modifier.height(6.dp))
-        Btn("Self-test · 10 s of UNKNOWN attributes → must fail safe", ghost = true) {
-            ActionSelfTest.start(
-                usage = android.media.AudioAttributes.USAGE_UNKNOWN,
-                content = android.media.AudioAttributes.CONTENT_TYPE_UNKNOWN,
-                label = "UNKNOWN/UNKNOWN"
-            )
-        }
-        Text(
-            "Proves the classifier is live rather than decorative: PCM zeros — digital silence, " +
-                    "inaudible at any volume — with no audio-focus request, so nothing is heard " +
-                    "and nothing the user is playing is paused. The class above must move to " +
-                    "Music while it runs.",
-            color = T.Faint, fontSize = 10.sp, lineHeight = 14.5.sp,
-            modifier = Modifier.padding(top = 5.dp)
-        )
-
         SecHead("Queue", if (pending.isEmpty()) "empty" else "${pending.size} waiting")
         QueueCard(pending, traffic)
-
-        SecHead("Privilege", "tier 2")
-        PrivilegeBanner(shizuku)
 
         SecHead("Disruptive remediation", "$fired/${ActionPolicy.MAX_PER_HOUR} used this hour")
         ActionCatalog.all.forEach { r ->
@@ -128,24 +103,6 @@ fun ActionsScreen(modifier: Modifier = Modifier) {
             )
         }
 
-        SecHead("Settings deep links", "tier 0 · these work")
-        Text(
-            "We cannot set any of these. We can put you one tap from the right page with the " +
-                    "evidence in hand. Opening a page costs no connectivity, so the traffic gate " +
-                    "does not apply.",
-            color = T.Faint, fontSize = 10.5.sp, lineHeight = 15.sp,
-            modifier = Modifier.padding(bottom = 7.dp)
-        )
-        links.forEach { l ->
-            LinkCard(l) { notice = ActionDeepLinks.open(ctx, l) ?: "Opened ${l.target}." }
-        }
-
-        SecHead("Action log", "everything is logged")
-        LogCard(log)
-
-        Spacer(Modifier.height(12.dp))
-        CannotPanel()
-
         if (notice != null) {
             Spacer(Modifier.height(10.dp))
             Card {
@@ -159,9 +116,7 @@ fun ActionsScreen(modifier: Modifier = Modifier) {
     }
 }
 
-/* ----------------------------------------------------------------- traffic hero */
-
-private fun classColor(k: TrafficClass) = when (k) {
+internal fun classColor(k: TrafficClass) = when (k) {
     TrafficClass.REALTIME_CALL, TrafficClass.CONFERENCING -> T.Bad
     TrafficClass.UNKNOWN -> T.Warn
     TrafficClass.VIDEO -> T.Warn
@@ -283,7 +238,7 @@ private fun QueueCard(pending: List<QueuedAction>, t: TrafficState) {
 /* ----------------------------------------------------------------- privilege */
 
 @Composable
-private fun PrivilegeBanner(s: ShizukuStatus) {
+internal fun PrivilegeBanner(s: ShizukuStatus) {
     val c = if (s.ready) T.Good else T.Warn
     Column(
         Modifier.fillMaxWidth()
@@ -441,7 +396,7 @@ private fun LinkCard(l: ResolvedLink, onOpen: () -> Unit) {
 /* ----------------------------------------------------------------- log */
 
 @Composable
-private fun LogCard(log: List<ActionLogEntry>) {
+internal fun LogCard(log: List<ActionLogEntry>) {
     Card {
         if (log.isEmpty()) {
             Text("Nothing has been attempted yet. Every attempt, refusal and deep-link open " +
@@ -470,7 +425,7 @@ private fun outcomeColor(o: String) = when (o) {
 /* ----------------------------------------------------------------- cannot panel */
 
 @Composable
-private fun CannotPanel() {
+internal fun CannotPanel() {
     Column(
         Modifier.fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
@@ -507,19 +462,3 @@ private fun CannotRow(what: String, why: String) {
 }
 
 /* ----------------------------------------------------------------- button */
-
-@Composable
-private fun Btn(text: String, ghost: Boolean = false, onClick: () -> Unit) {
-    Box(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(11.dp))
-            .background(if (ghost) T.Surface2 else T.Brand)
-            .border(1.dp, if (ghost) T.Line else Color.Transparent, RoundedCornerShape(11.dp))
-            .clickableNoRipple(onClick)
-            .padding(vertical = 11.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(text, color = if (ghost) T.Text else Color(0xFF05192E), fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold)
-    }
-}

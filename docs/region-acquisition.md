@@ -62,7 +62,8 @@ It is still someone else's bandwidth. So:
 - **requests are merged** — byte ranges are coalesced until the count fits a per-region budget;
   a local region is ~44 requests for 14 MB, 4.7 % overfetch;
 - **429 and 5xx back off exponentially and then give up**, rather than retrying into a wall;
-- **nothing is fetched at all** unless the phone is on unmetered Wi-Fi.
+- **nothing is fetched on mobile data** unless the user has allowed it in Settings, and never while
+  roaming unless that has been allowed separately.
 
 **At any real install base the right answer is to mirror the planet ourselves.** That is one
 constant — `RegionAcquisition.PLANET_URL` — and nothing else changes.
@@ -196,7 +197,8 @@ bins — so the detail tier is coextensive with the ground the app has data for.
 0.5° grid rather than a box centred on the user, so walking 200 m never re-downloads an
 overlapping region, and a cell can be named, listed and deleted.
 
-**Gating** is on conditions, never on prompts: unmetered and validated Wi-Fi or ethernet, battery
+**Gating** is on conditions, never on prompts: unmetered and validated Wi-Fi or ethernet (or
+validated cellular, as far as `MapDataPolicy` allows — home network, or roaming too), battery
 above 20 % or charging, and enough free space that the 400 MB measurement reserve survives. A
 blocked download is **queued, not failed**, and the Map tab says exactly what it is waiting for.
 One notification after the fact, per region. Nothing asks.

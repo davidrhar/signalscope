@@ -19,6 +19,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.signalscope.collect.RegionAcquisition
+import com.signalscope.store.MapDataPolicy
 import com.signalscope.store.RegionBoxes
 import com.signalscope.store.RegionStore
 import kotlinx.coroutines.Dispatchers
@@ -119,8 +120,14 @@ fun RegionPanel(onClose: () -> Unit, modifier: Modifier = Modifier) {
                     fontSize = 10.sp, lineHeight = 13.sp
                 )
                 Text(
-                    "A deferred download is queued, not failed. Nothing here will ever prompt, " +
-                        "and nothing is fetched on cellular.",
+                    "A deferred download is queued, not failed. Nothing here will ever prompt. " +
+                        when (st.conditions?.allow ?: MapDataPolicy.get(ctx)) {
+                            MapDataPolicy.Allow.WIFI_ONLY -> "Nothing is fetched on mobile data"
+                            MapDataPolicy.Allow.MOBILE_HOME -> "Mobile data is used on the home " +
+                                "network, never while roaming"
+                            MapDataPolicy.Allow.MOBILE_ROAMING -> "Mobile data is used, " +
+                                "including while roaming"
+                        } + " — change this in Settings.",
                     color = T.Faint, fontSize = 9.sp, lineHeight = 12.sp
                 )
             }
@@ -161,8 +168,20 @@ fun RegionPanel(onClose: () -> Unit, modifier: Modifier = Modifier) {
             // ------------------------------------------------ conditions
             st.conditions?.let { c ->
                 Section("Conditions")
-                ERow("transport", c.transport + if (c.unmetered) " · unmetered" else " · metered",
-                    if (c.unmetered) T.Good else T.Warn)
+                ERow(
+                    "transport",
+                    c.transport + (if (c.unmetered) " · unmetered" else " · metered") +
+                        if (c.roaming) " · roaming" else "",
+                    if (c.networkAllowed) T.Good else T.Warn
+                )
+                ERow(
+                    "mobile data",
+                    when (c.allow) {
+                        MapDataPolicy.Allow.WIFI_ONLY -> "not allowed"
+                        MapDataPolicy.Allow.MOBILE_HOME -> "home network only"
+                        MapDataPolicy.Allow.MOBILE_ROAMING -> "allowed, including roaming"
+                    }
+                )
                 ERow(
                     "battery",
                     (if (c.batteryPct >= 0) "${c.batteryPct}%" else "unknown") +

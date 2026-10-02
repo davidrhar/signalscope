@@ -24,7 +24,7 @@ package com.signalscope.store
  */
 object Networks {
 
-    private val NAMES: Map<String, String> = mapOf(
+    private val RAW: Map<String, String> = mapOf(
         // Singapore
         "525-01" to "Singtel",
         "525-02" to "Singtel",
@@ -39,6 +39,16 @@ object Networks {
         "510-01" to "Indosat",
         "510-89" to "Tri"
     )
+
+    /**
+     * Keyed by the normalised code, not by the spelling written in [RAW].
+     *
+     * The table is written the way a person reads a PLMN -- 525-01 -- and looked up through
+     * [normalise], which strips the leading zero. Those two did not agree, so every operator with
+     * a leading zero in its MNC silently failed to resolve and showed as a bare code. Simba is
+     * 525-10 and has no leading zero, which is exactly why it kept working and hid the rest.
+     */
+    private val NAMES: Map<String, String> = RAW.mapKeys { normalise(it.key) }
 
     /** The recognisable name, or the code itself when it is not one this app can vouch for. */
     fun name(plmn: String?): String {

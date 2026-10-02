@@ -281,25 +281,9 @@ private suspend fun writeBundle(ctx: Context): File {
     return f
 }
 
-/** Local copy: ActionsScreen's is private to that file. */
-@Composable
-private fun Btn(text: String, ghost: Boolean = false, onClick: () -> Unit) {
-    Box(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(11.dp))
-            .background(if (ghost) T.Surface2 else T.Brand)
-            .border(1.dp, if (ghost) T.Line else Color.Transparent, RoundedCornerShape(11.dp))
-            .clickableNoRipple(onClick)
-            .padding(vertical = 11.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(text, color = if (ghost) T.Text else Color(0xFF05192E), fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold)
-    }
-}
 
 /** "3 hours ago" -- coarse on purpose; the exact second of an upload is nobody's business. */
-private fun ago(wall: Long): String {
+internal fun ago(wall: Long): String {
     val m = (System.currentTimeMillis() - wall) / 60_000
     return when {
         m < 2 -> "just now"

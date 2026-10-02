@@ -19,6 +19,7 @@ import com.signalscope.collect.CollectorService
 import com.signalscope.collect.FixBuffer
 import com.signalscope.store.Db
 import com.signalscope.store.Export
+import com.signalscope.store.SiteAggregator
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -53,6 +54,8 @@ fun YourDataPanel() {
             "Everything collected stays on this phone. You can take a copy of it, or destroy it.",
             color = T.Dim, fontSize = 12.5.sp, lineHeight = 17.sp
         )
+        Spacer(Modifier.height(9.dp))
+        MastRecordLine()
         Spacer(Modifier.height(11.dp))
 
         Btn("Export a copy", ghost = true) {
@@ -117,29 +120,47 @@ private suspend fun wipe(ctx: Context) {
         val db = Db.get(ctx).openHelper.writableDatabase
         listOf(
             "radio_sample", "registration_event", "link_event",
-            "probe_result", "neighbour_cell", "instrument_event", "bin_agg"
+            "probe_result", "neighbour_cell", "instrument_event", "bin_agg", "site_stat"
         ).forEach { t -> runCatching { db.execSQL("DELETE FROM `$t`") } }
         runCatching { db.execSQL("VACUUM") }
     }
     // The compacted roll-ups live as gzipped files outside SQLite and would otherwise survive.
+    // The mast record is a standing total that outlives the rows it was built from, so emptying
+    // radio_sample does not empty it. Its watermark goes too, or the fold would resume mid-history.
+    runCatching { SiteAggregator.forget(ctx) }
     runCatching { ctx.filesDir.resolve("rollup").deleteRecursively() }
     runCatching { ctx.filesDir.resolve("export").deleteRecursively() }
     Consent.revoke(ctx)
 }
 
-/** Local copy: ActionsScreen's is private to that file and this panel is used from elsewhere. */
+/**
+ * What the app has worked out about masts, in one line.
+ *
+ * The mast warning on the Live tab is silent by design -- it says nothing when a mast is fine,
+ * nothing when it is unknown, and nothing while the record is still being built. Three different
+ * states that look identical from outside, which makes the whole feature impossible to tell apart
+ * from broken. This is the only place that distinguishes them.
+ */
 @Composable
-private fun Btn(text: String, ghost: Boolean = false, onClick: () -> Unit) {
-    Box(
-        Modifier.fillMaxWidth()
-            .clip(RoundedCornerShape(11.dp))
-            .background(if (ghost) T.Surface2 else T.Brand)
-            .border(1.dp, if (ghost) T.Line else Color.Transparent, RoundedCornerShape(11.dp))
-            .clickableNoRipple(onClick)
-            .padding(vertical = 11.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(text, color = if (ghost) T.Text else Color(0xFF05192E), fontSize = 13.sp,
-            fontWeight = FontWeight.SemiBold)
+private fun MastRecordLine() {
+    val ctx = LocalContext.current
+    var st by remember { mutableStateOf<SiteAggregator.Status?>(null) }
+    LaunchedEffect(Unit) {
+        while (true) {
+            st = withContext(Dispatchers.IO) { SiteAggregator.status(ctx) }
+            kotlinx.coroutines.delay(30_000)
+        }
     }
+    val s = st ?: return
+    val text = when {
+        s.slots == 0 && s.behind == 0L -> "No mast record yet — nothing measured to build one from."
+        s.slots == 0 -> "Building the mast record: ${fmt(s.behind)} readings still to fold in."
+        s.behind > 0L ->
+            "${s.masts} masts over ${s.slots} times of day, from ${fmt(s.samples)} readings — " +
+                "${fmt(s.behind)} more still to fold in."
+        else -> "${s.masts} masts over ${s.slots} times of day, from ${fmt(s.samples)} readings."
+    }
+    Text(text, color = T.Faint, fontSize = 11.5.sp, lineHeight = 15.sp)
 }
+
+private fun fmt(n: Long) = if (n < 10_000) "$n" else "%,d".format(n)

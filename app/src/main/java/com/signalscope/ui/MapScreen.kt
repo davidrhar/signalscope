@@ -26,6 +26,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.signalscope.collect.LiveState
 import com.signalscope.collect.MapLocationCollector
 import com.signalscope.collect.RegionAcquisition
 import com.signalscope.store.Bin
@@ -89,7 +90,7 @@ private enum class MapLayer(val key: String, val label: String) {
 private fun hex(s: String) = Color(android.graphics.Color.parseColor(s))
 
 @Composable
-fun MapScreen(modifier: Modifier = Modifier) {
+fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
 
@@ -104,8 +105,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
     var crowdBusy by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Bin?>(null) }
     var legendOpen by remember { mutableStateOf(false) }
-    /** The sharing controls, reachable from the map rather than only from a dense Actions tab. */
-    var shareOpen by remember { mutableStateOf(false) }
+    /** The sharing controls, reachable from the map, and from the sharing row in Settings. */
+    var shareOpen by remember { mutableStateOf(openShare) }
     var tilesRendered by remember { mutableStateOf<Boolean?>(null) }
     var styleError by remember { mutableStateOf<String?>(null) }
     var regionsOpen by remember { mutableStateOf(false) }
@@ -119,6 +120,10 @@ fun MapScreen(modifier: Modifier = Modifier) {
      */
     var detailOpen by remember { mutableStateOf(false) }
 
+    /** Networks outside the country the phone is in now, folded away until asked for. */
+    var elsewhereOpen by remember { mutableStateOf(false) }
+
+    val sims by LiveState.sims.collectAsStateWithLifecycle()
     val fix by MapLocationCollector.state.collectAsStateWithLifecycle()
     val regions by RegionAcquisition.state.collectAsStateWithLifecycle()
 
@@ -277,10 +282,39 @@ fun MapScreen(modifier: Modifier = Modifier) {
                 .sortedByDescending { it.value }
                 .mapNotNull { it.key }
         }
-        LaunchedEffect(networks) {
+
+        /**
+         * The country the phone is in now, as an MCC, or null if nothing is registered.
+         *
+         * Taken from the network actually serving a SIM, never from the card: a roaming SIM's home
+         * MCC is the one country the phone is certainly NOT in, and keying this on it would hide
+         * precisely the networks being used and show the ones left behind.
+         */
+        val hereMcc = remember(sims) {
+            sims.values.map { it.plmn }.firstOrNull { it.length >= 3 && it[0].isDigit() }?.take(3)
+        }
+
+        /**
+         * A phone that has travelled accumulates every network it has ever registered on, and the
+         * chip row grows until it is scroll-only furniture. Nearly all of it is irrelevant: a
+         * network in a country you left in March cannot be compared with the one you are on now.
+         *
+         * So the row shows this country's networks, and folds the rest behind one chip. Nothing is
+         * dropped -- the old data is still there and still filterable, it is just not the first
+         * thing competing for the row. With no MCC to compare against, everything is "here",
+         * which is the right answer for a phone that has never left.
+         */
+        val nearby = remember(networks, hereMcc) {
+            if (hereMcc == null) networks else networks.filter { it.startsWith("$hereMcc-") }
+        }
+        val elsewhere = remember(networks, nearby) { networks - nearby.toSet() }
+
+        LaunchedEffect(networks, nearby) {
             // A filter pinned to a network that has dropped out of the data would show an empty
             // map with no visible cause. Clear it rather than leave the user staring at nothing.
             if (onlyNetwork != null && onlyNetwork !in networks) onlyNetwork = null
+            // Crossing a border must not hide the chip that is currently filtering the map.
+            if (onlyNetwork != null && onlyNetwork !in nearby) elsewhereOpen = true
         }
 
         // ---------------------------------------------------------------- top chrome
@@ -311,9 +345,22 @@ fun MapScreen(modifier: Modifier = Modifier) {
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Chip("All networks", onlyNetwork == null) { onlyNetwork = null }
-                    networks.forEach { p ->
+                    nearby.forEach { p ->
                         Chip(Networks.name(p), onlyNetwork == p) {
                             onlyNetwork = if (onlyNetwork == p) null else p
+                        }
+                    }
+                    if (elsewhere.isNotEmpty()) {
+                        Chip("Elsewhere · ${elsewhere.size}", elsewhereOpen) {
+                            elsewhereOpen = !elsewhereOpen
+                            // Folding away the network being filtered on would leave the map
+                            // showing one network with no chip saying which.
+                            if (!elsewhereOpen && onlyNetwork in elsewhere) onlyNetwork = null
+                        }
+                        if (elsewhereOpen) elsewhere.forEach { p ->
+                            Chip(Networks.name(p), onlyNetwork == p) {
+                                onlyNetwork = if (onlyNetwork == p) null else p
+                            }
                         }
                     }
                 }
@@ -364,9 +411,8 @@ fun MapScreen(modifier: Modifier = Modifier) {
                         legendOpen = !legendOpen; if (legendOpen) shareOpen = false
                     }
                     Spacer(Modifier.width(6.dp))
-                    // Sharing belongs beside the map it contributes to. On the Actions tab it is
-                    // correct and surrounded by twenty diagnostic panels, which is where a control
-                    // goes to be missed.
+                    // Sharing belongs beside the map it contributes to. Settings shows its state
+                    // and sends people here rather than holding a second copy of the consent.
                     Chip(if (shareOpen) "Hide share" else "Share", shareOpen) {
                         shareOpen = !shareOpen; if (shareOpen) legendOpen = false
                     }
