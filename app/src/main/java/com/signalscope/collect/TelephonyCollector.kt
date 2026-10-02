@@ -180,7 +180,26 @@ class TelephonyCollector(
      */
     private fun applyServing(s: SimState, cellInfo: List<CellInfo>): SimState {
         val base = s.copy(neighbourCountSeen = cellInfo.size, cellUpdates = s.cellUpdates + 1)
-        val serving = cellInfo.firstOrNull { it.isRegistered }
+        // The PRIMARY cell, not merely a registered one.
+        //
+        // Under carrier aggregation the secondary carrier also reports isRegistered, and the
+        // modem's ordering of the list is not stable -- `firstOrNull { isRegistered }` therefore
+        // alternated between the two from one reading to the next. In nine days of collection
+        // that produced 46,615 apparent mast changes in six days of one city, a median dwell of
+        // two seconds, and 92 % of changes going straight back to the previous cell. Every one of
+        // those flips was between different eNodeBs on different channels, and the band pairs were
+        // exactly the aggregation combinations in use: 3+40, 7+40, 3+8, 7+8.
+        //
+        // It mattered more than a wrong cell id. The signal numbers on a row come from
+        // SignalStrength, which reports the PRIMARY cell -- so half the rows attributed the
+        // primary's RSRP, RSRQ and SINR to the secondary's identity and band. Mast statistics were
+        // diluted and band comparisons mixed two bands together, which is the measurement the
+        // whole project turns on.
+        //
+        // getCellConnectionStatus() has existed since API 28 and this app requires 31. The
+        // registered-cell fallback stays for a modem that reports no connection status at all.
+        val serving = cellInfo.firstOrNull { it.cellConnectionStatus == CellInfo.CONNECTION_PRIMARY_SERVING }
+            ?: cellInfo.firstOrNull { it.isRegistered }
             ?: return base.copy(servingReported = false)
         val ageMs = (SystemClock.elapsedRealtime() - serving.timestampMillis).coerceAtLeast(0L)
         val readingWall = System.currentTimeMillis() - ageMs
@@ -272,6 +291,10 @@ class TelephonyCollector(
             // would file the serving cell as its own neighbour.
             val servingIsNr = sim?.cellRat == Bands.NR
             val rows = cellInfo.asSequence()
+                // A secondary serving cell is not a neighbour -- it is the other half of this
+                // connection. It was already excluded by isRegistered; saying so explicitly keeps
+                // it excluded now that the serving pick no longer relies on that flag.
+                .filter { it.cellConnectionStatus != CellInfo.CONNECTION_SECONDARY_SERVING }
                 .filter { !it.isRegistered || (it is CellInfoNr && !servingIsNr) }
                 .mapNotNull { runCatching { neighbourOf(subId, it, nowElapsed, nowWall) }.getOrNull() }
                 .sortedByDescending { it.rsrp }
@@ -759,6 +782,10 @@ class TelephonyCollector(
                 if (id?.bandReported != null && id.bandDerived != null && id.bandReported != id.bandDerived)
                     q = q or Quality.BAND_MISMATCH
                 if (withheld) q = q or Quality.IDENTITY_WITHHELD
+
+                // Every reading that is good enough to store is good enough to judge the area by,
+                // and this is the single point they all pass through.
+                runCatching { AreaState.offer(ctx, nowWall, sig.rssnr) }
 
                 dao.insertRadio(
                     RadioSample(

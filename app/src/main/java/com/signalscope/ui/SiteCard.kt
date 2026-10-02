@@ -9,6 +9,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.signalscope.collect.AreaState
 import com.signalscope.collect.SimState
 import com.signalscope.store.SiteHistory
 
@@ -86,3 +88,33 @@ fun SiteCard(s: SimState) {
 }
 
 private fun pct(f: Double) = "%.0f %%".format(f * 100)
+
+
+/**
+ * The same state the notification reports, for someone who has the app open.
+ *
+ * A notification that fires while the phone is in a pocket and is swiped away unread is the only
+ * record that anything happened. This is where it can be checked afterwards, and it is also the
+ * honest place to put the share -- the notification says a thing is true, this says how true.
+ *
+ * Silent when the connection is fine, like everything else on this screen.
+ */
+@Composable
+fun AreaCard() {
+    val s by AreaState.state.collectAsStateWithLifecycle()
+    if (!s.poor) return
+    SecHead("This place", "from the last ten minutes")
+    AccentCard(T.Bad) {
+        Text(
+            "Data is unlikely to work well here.",
+            color = T.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold, lineHeight = 19.sp
+        )
+        Spacer(Modifier.height(7.dp))
+        Text(
+            (s.share?.let { "${pct(it)} of the readings in the last ten minutes were below the " +
+                "level where calls and video stop working. " } ?: "") +
+                "Wi-Fi avoids this entirely, and moving a short distance may hand you to another mast.",
+            color = T.Dim, fontSize = 12.5.sp, lineHeight = 17.sp
+        )
+    }
+}

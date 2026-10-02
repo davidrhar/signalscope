@@ -184,6 +184,9 @@ private fun Root() {
                 // Before the cell's own numbers, because "this mast has done this to you before"
                 // is the answer to the question being asked while a call breaks up, and the
                 // numbers are the evidence for it rather than the point.
+                // Where you are now, then what this mast has done before: the live fact first,
+                // because it is the one the person is asking about while a call breaks up.
+                AreaCard()
                 SiteCard(active)
                 SecHead("Serving cell", "updated live")
                 CellCard(active)

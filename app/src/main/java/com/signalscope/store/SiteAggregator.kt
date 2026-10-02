@@ -45,8 +45,19 @@ object SiteAggregator {
      * 2: counts a reading as LTE by the SERVING CELL's technology, not by whichever bearer was
      *    carrying data. Version 1 read `rat` and so discarded every reading taken while Wi-Fi
      *    calling was up, each of which had a perfectly usable LTE cell id on it.
+     *
+     * 3: starts again from the moment of the upgrade rather than from the oldest stored row,
+     *    which no other version has had to do. Rows written before the carrier-aggregation fix
+     *    in TelephonyCollector.applyServing carry a serving cell that is the primary on some
+     *    readings and the secondary on others, so a mast's record built from them is a blend of
+     *    two masts on two bands. That cannot be repaired by re-reading: the rows do not say which
+     *    reading was which. Discarding the record and waiting for correct rows is the only honest
+     *    answer, and it costs a few days of silence from the mast card.
      */
-    private const val FOLD_VERSION = 2
+    private const val FOLD_VERSION = 3
+
+    /** Versions whose upgrade must skip the stored backlog instead of re-reading it. */
+    private val SKIP_BACKLOG = setOf(3)
 
     private const val EVERY_MS = 10 * 60_000L
     private const val DAY_MS = 86_400_000L
@@ -78,7 +89,10 @@ object SiteAggregator {
             runCatching {
                 Db.get(ctx).openHelper.writableDatabase.execSQL("DELETE FROM `site_stat`")
             }
-            prefs.edit().remove(KEY_MARK).putInt(KEY_VER, FOLD_VERSION).apply()
+            val e = prefs.edit().putInt(KEY_VER, FOLD_VERSION)
+            if (FOLD_VERSION in SKIP_BACKLOG) e.putLong(KEY_MARK, System.currentTimeMillis())
+            else e.remove(KEY_MARK)
+            e.apply()
         }
 
         val mark = prefs.getLong(KEY_MARK, 0L)

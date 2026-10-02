@@ -346,6 +346,8 @@ class CollectorService : LifecycleService() {
         runCatching { com.signalscope.store.BinAggregator.stop() }
         runCatching { com.signalscope.store.Uploader.stop() }
         runCatching { com.signalscope.store.SiteAggregator.stop() }
+        // So a restart does not announce a state inferred from before it stopped.
+        runCatching { AreaState.reset() }
         runCatching { EnvironmentContext.stop() }
         runCatching { CarrierAggregation.stop() }
         runCatching { ActionTraffic.stop() }
