@@ -121,6 +121,20 @@ object SharedMap {
                 )
             )
         }
+        // Names travel with the snapshot, so they are adopted on every parse -- including the one
+        // that reads the disk cache, which is what makes a crowd network named while offline.
+        runCatching {
+            val n = o.optJSONObject("names")
+            if (n != null) {
+                val out = HashMap<String, String>(n.length())
+                n.keys().forEach { k ->
+                    val v = n.optJSONArray(k) ?: return@forEach
+                    v.optString(0).takeIf { it.isNotEmpty() }?.let { out[k] = it }
+                }
+                Networks.adopt(out)
+            }
+        }
+
         return Snapshot(
             cells = cells,
             generated = o.optString("generated", "?"),

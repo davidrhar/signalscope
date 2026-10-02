@@ -10,6 +10,22 @@
  * they disagree. That test is the only thing making the duplication safe.
  */
 
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * code -> [brand, country]. Generated; see scripts/build-plmn-names.mjs.
+ *
+ * Read rather than imported: a JSON import attribute is a syntax the runtime either supports or
+ * rejects at parse time, which turns a Node version difference between here and the container
+ * into a module that will not load at all. readFileSync cannot fail that way.
+ */
+const PLMN_NAMES_DOC = JSON.parse(
+  readFileSync(join(dirname(fileURLToPath(import.meta.url)), 'plmn-names.json'), 'utf8'),
+);
+const PLMN_NAMES = PLMN_NAMES_DOC.names;
+
 export const MIN_CONTRIBUTORS = 3;
 export const MIN_SAMPLES = 30;
 
@@ -91,6 +107,35 @@ export function aggregate(bundles) {
   return { cells: published, seen: cells.size, withheld };
 }
 
+/**
+ * Names for the networks in a snapshot, and nothing else.
+ *
+ * A phone can learn what a network calls itself only by registering on it, which names exactly
+ * the networks its owner has used and none of the ones everybody else contributed. The shared map
+ * is the one place where that is not enough, so the names travel with the data.
+ *
+ * Only the codes actually present are sent. The full list is 3,384 entries and a snapshot holds a
+ * handful, so shipping all of it would mean the names outweighing the measurements by an order of
+ * magnitude for no reader's benefit.
+ */
+function namesFor(cells) {
+  const out = {};
+  for (const c of cells) {
+    const key = normalisePlmn(c.network);
+    if (!key || out[key]) continue;
+    const hit = PLMN_NAMES[key];
+    if (hit) out[key] = hit;
+  }
+  return out;
+}
+
+/** Must agree with Networks.normalise in the app and with the generator, or lookups miss. */
+function normalisePlmn(plmn) {
+  const parts = String(plmn ?? '').split('-');
+  if (parts.length !== 2) return null;
+  return `${parts[0]}-${parts[1].replace(/^0+/, '') || '0'}`;
+}
+
 /** The published document, exactly as the app will fetch it. */
 export function sharedMap(bundles) {
   const { cells, seen, withheld } = aggregate(bundles);
@@ -104,5 +149,7 @@ export function sharedMap(bundles) {
     cellsSeen: seen,
     cellsWithheld: withheld,
     cells,
+    names: namesFor(cells),
+    namesSource: PLMN_NAMES_DOC._source,
   };
 }

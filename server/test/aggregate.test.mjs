@@ -14,7 +14,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { aggregate, MIN_CONTRIBUTORS, MIN_SAMPLES } from '../src/aggregate.js';
+import { aggregate, sharedMap, MIN_CONTRIBUTORS, MIN_SAMPLES } from '../src/aggregate.js';
 
 const rec = (area, network, band, samples, week = '2026-W38') => ({
   area, res: 8, network, band, samples,
@@ -96,4 +96,25 @@ test('agrees with the Python aggregator, cell for cell', () => {
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('names cover the published networks and nothing else', () => {
+  const doc = sharedMap(FIXTURES);
+  const published = new Set(doc.cells.map((c) => c.network));
+  assert.ok(published.size > 0, 'fixture publishes nothing, so this proves nothing');
+
+  // The leading zero is the trap: the app normalises 525-05 to 525-5 before looking it up, and a
+  // table keyed the other way misses silently -- which is how Singtel and StarHub spent weeks
+  // displayed as bare codes in the app itself.
+  for (const plmn of published) {
+    const key = `${plmn.split('-')[0]}-${plmn.split('-')[1].replace(/^0+/, '')}`;
+    assert.ok(doc.names[key], `no name for published network ${plmn} (looked up as ${key})`);
+  }
+  assert.equal(doc.names['525-10'][0], 'SIMBA');
+  assert.equal(doc.names['525-10'][1], 'Singapore');
+
+  // Only what is in the snapshot. The full table is 3,000-odd entries and sending it would make
+  // the names larger than the measurements by an order of magnitude.
+  assert.equal(Object.keys(doc.names).length, published.size);
+  assert.equal(doc.names['424-2'], undefined);
 });

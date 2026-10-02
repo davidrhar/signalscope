@@ -44,9 +44,49 @@ object Networks {
 
     /** Load what has been learned before. Cheap, and safe to call more than once. */
     fun prime(ctx: android.content.Context) {
+        loadShipped(ctx)
         runCatching {
             ctx.getSharedPreferences(PREFS, android.content.Context.MODE_PRIVATE).all
                 .forEach { (k, v) -> (v as? String)?.takeIf { it.isNotBlank() }?.let { learned[k] = it } }
+        }
+    }
+
+    /**
+     * Names from a published MCC/MNC list, rather than from this phone or from this project.
+     *
+     * Last of the three tiers because it is the only one not first-hand. A curated entry was
+     * checked here; a learned one came off the modem of the network in question; this came off a
+     * list, which is right far more often than it is wrong but is nobody's own observation.
+     *
+     * Two sources fill it, and they cover different gaps. The copy shipped with the app
+     * (`assets/plmn-names.tsv`) names the codes on THIS phone's map -- the ones the owner has
+     * used, which nobody else may ever contribute. The shared map carries names for the codes in
+     * ITS snapshot, which are everyone else's and may not be in a build this old. Each is useless
+     * for the other's job, so both go in, snapshot last because it cannot be stale.
+     *
+     * Regenerate both with `node server/scripts/build-plmn-names.mjs`.
+     */
+    private val listed = java.util.concurrent.ConcurrentHashMap<String, String>()
+
+    /** Merge the names a snapshot carried over whatever the shipped copy said. */
+    fun adopt(names: Map<String, String>) {
+        names.forEach { (plmn, n) ->
+            val k = normalise(plmn.trim())
+            n.trim().takeIf { it.isNotEmpty() }?.let { listed[k] = it }
+        }
+    }
+
+    private fun loadShipped(ctx: android.content.Context) {
+        if (listed.isNotEmpty()) return
+        runCatching {
+            ctx.assets.open("plmn-names.tsv").bufferedReader().useLines { lines ->
+                lines.forEach { line ->
+                    if (line.isEmpty() || line[0] == '#') return@forEach
+                    val t = line.indexOf('\t')
+                    if (t <= 0 || t == line.length - 1) return@forEach
+                    listed[line.substring(0, t)] = line.substring(t + 1)
+                }
+            }
         }
     }
 
@@ -127,12 +167,14 @@ object Networks {
         val p = plmn?.trim().orEmpty()
         if (p.isEmpty() || p == "—" || p == "?-?") return "unknown network"
         val key = normalise(p)
-        return NAMES[key] ?: learned[key] ?: p
+        return NAMES[key] ?: learned[key] ?: listed[key] ?: p
     }
 
     /** True when [name] would return something other than the code. */
     fun isKnown(plmn: String?): Boolean =
-        plmn != null && normalise(plmn).let { NAMES.containsKey(it) || learned.containsKey(it) }
+        plmn != null && normalise(plmn).let {
+            NAMES.containsKey(it) || learned.containsKey(it) || listed.containsKey(it)
+        }
 
     /**
      * A band label as a person should read it.
