@@ -228,6 +228,24 @@ object MapHex {
         intArrayOf(-1, 0)   // phi 6
     )
 
+    /**
+     * The six cells touching this one.
+     *
+     * Axial coordinates, so a neighbour is one step in q, in r, or in both the opposite way. This
+     * exists for one reason: a place has neighbours and a mast does not, which is what makes "the
+     * area you are heading into" a question that can be answered at all.
+     */
+    fun neighbours(id: Long): List<Long> {
+        val res = resolutionOf(id)
+        val q = qOf(id)
+        val r = rOf(id)
+        return listOf(
+            encode(res, q + 1, r), encode(res, q - 1, r),
+            encode(res, q, r + 1), encode(res, q, r - 1),
+            encode(res, q + 1, r - 1), encode(res, q - 1, r + 1)
+        )
+    }
+
     fun cellToParent(id: Long, parentRes: Int): Long {
         var cur = id
         while (resolutionOf(cur) > parentRes) cur = parentOnce(cur)

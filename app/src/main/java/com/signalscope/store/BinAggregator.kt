@@ -58,6 +58,10 @@ object BinAggregator {
      * history, and is not worth taking the collector down for.
      */
     suspend fun flush(ctx: Context): Int? {
+        // The hourly record of how data behaved per place. Independent of everything below -- it
+        // is accumulated live rather than built from fixes -- but it belongs on this cadence.
+        runCatching { AreaHistory.flush(ctx) }
+
         val cutoff = System.currentTimeMillis() - LAG_MS
         val consumed = FixBuffer.drainThrough(cutoff)
         if (consumed.isEmpty()) return null
@@ -90,6 +94,7 @@ object BinAggregator {
     /** Drop bins not seen inside the retention window. Same policy as the raw tables. */
     suspend fun sweep(ctx: Context, maxAgeMs: Long): Int = runCatching {
         val cutoffDay = ((System.currentTimeMillis() - maxAgeMs) / DAY_MS).toInt()
+        runCatching { AreaHistory.sweep(ctx, maxAgeMs) }
         Db.get(ctx).dao().sweepBinAgg(cutoffDay)
     }.getOrDefault(0)
 }

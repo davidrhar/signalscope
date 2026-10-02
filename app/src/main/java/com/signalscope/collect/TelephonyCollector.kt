@@ -674,6 +674,19 @@ class TelephonyCollector(
     private suspend fun pollOnce() {
         val subs = LiveState.sims.value.keys.ifEmpty { return }
         tick++
+
+        // Look-ahead, about once a minute rather than on every tick: it is a query over seven bins
+        // and the answer cannot change faster than the phone can walk out of a 460 m cell. On the
+        // poll loop rather than a timer of its own, because this loop already exists and already
+        // knows whether the phone is moving.
+        if (tick % 20 == 0L) scope.launch {
+            runCatching {
+                val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+                com.signalscope.store.AreaHistory.here(ctx, hour)?.let {
+                    AreaState.offerLookahead(ctx, it, System.currentTimeMillis())
+                }
+            }
+        }
         for (subId in subs) {
             val tm = tmFor(subId) ?: continue
             // Registration and RAT come BEFORE the freshness check below, because that check is
@@ -786,6 +799,7 @@ class TelephonyCollector(
                 // Every reading that is good enough to store is good enough to judge the area by,
                 // and this is the single point they all pass through.
                 runCatching { AreaState.offer(ctx, nowWall, sig.rssnr) }
+                runCatching { com.signalscope.store.AreaHistory.offer(ctx, nowWall, sig.rssnr) }
 
                 dao.insertRadio(
                     RadioSample(

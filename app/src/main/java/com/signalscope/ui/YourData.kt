@@ -140,7 +140,8 @@ private suspend fun wipe(ctx: Context) {
         val db = Db.get(ctx).openHelper.writableDatabase
         listOf(
             "radio_sample", "registration_event", "link_event",
-            "probe_result", "neighbour_cell", "instrument_event", "bin_agg", "site_stat"
+            "probe_result", "neighbour_cell", "instrument_event", "bin_agg", "site_stat",
+            "bin_hour"
         ).forEach { t -> runCatching { db.execSQL("DELETE FROM `$t`") } }
         runCatching { db.execSQL("VACUUM") }
     }

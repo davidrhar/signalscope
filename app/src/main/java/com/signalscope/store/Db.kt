@@ -228,6 +228,16 @@ interface CollectorDao {
 
     @Query("SELECT * FROM site_stat") suspend fun allSiteStats(): List<SiteStat>
 
+    @Query("SELECT * FROM bin_hour WHERE binId IN (:bins)")
+    suspend fun binHours(bins: List<Long>): List<BinHourStat>
+
+    @Query("SELECT * FROM bin_hour") suspend fun allBinHours(): List<BinHourStat>
+
+    @androidx.room.Upsert suspend fun upsertBinHours(rows: List<BinHourStat>)
+
+    @Query("DELETE FROM bin_hour WHERE lastSeenDay < :cutoffDay")
+    suspend fun sweepBinHours(cutoffDay: Int): Int
+
     @androidx.room.Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
     suspend fun upsertSiteStats(rows: List<SiteStat>)
 
@@ -262,8 +272,8 @@ interface CollectorDao {
 @Database(
     entities = [RadioSample::class, RegistrationEvent::class, LinkEvent::class,
         ProbeResult::class, NeighbourCell::class, InstrumentEvent::class, BinAgg::class,
-        SiteStat::class],
-    version = 7,
+        SiteStat::class, BinHourStat::class],
+    version = 8,
     exportSchema = false
 )
 abstract class Db : RoomDatabase() {
@@ -429,6 +439,20 @@ abstract class Db : RoomDatabase() {
                 "PRIMARY KEY(`plmn`, `site`, `hourBucket`))"
         )
 
+        internal val MIGRATION_7_8_SQL = listOf(
+            "CREATE TABLE IF NOT EXISTS `bin_hour` (" +
+                "`binId` INTEGER NOT NULL, `hourBucket` INTEGER NOT NULL, " +
+                "`samples` INTEGER NOT NULL, `belowZero` INTEGER NOT NULL, " +
+                "`lastSeenDay` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`binId`, `hourBucket`))"
+        )
+
+        private val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_7_8_SQL.forEach { db.execSQL(it) }
+            }
+        }
+
         private val MIGRATION_6_7 = object : androidx.room.migration.Migration(6, 7) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 MIGRATION_6_7_SQL.forEach { db.execSQL(it) }
@@ -438,7 +462,7 @@ abstract class Db : RoomDatabase() {
         @Volatile private var inst: Db? = null
         fun get(ctx: Context): Db = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx.applicationContext, Db::class.java, "signalscope.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                 .build().also { inst = it }
         }
     }

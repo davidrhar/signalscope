@@ -100,10 +100,50 @@ object AreaState {
         runCatching { notify(ctx, want, held) }
     }
 
+    /**
+     * "The area you are heading into has been poor" -- the one thing here that is a prediction.
+     *
+     * Kept apart from the live state deliberately. That one reports a fact about now and is always
+     * true when it fires; this one is a guess about a place the phone has not reached, from its own
+     * past visits at this hour. It gets a weaker word ("has been", not "is"), it only fires when
+     * the current bin is fine, and it will not repeat for the same ring within an hour.
+     */
+    @Synchronized
+    fun offerLookahead(ctx: Context, v: com.signalscope.store.AreaHistory.Verdict, wallMillis: Long) {
+        if (!v.ahead || _state.value.poor) return
+        if (wallMillis - lastAhead < LOOKAHEAD_QUIET_MS) return
+        lastAhead = wallMillis
+        runCatching { notifyAhead(ctx, v) }
+    }
+
+    private var lastAhead = 0L
+    private const val LOOKAHEAD_QUIET_MS = 60 * 60_000L
+    private const val AHEAD_ID = 44
+
+    private fun notifyAhead(ctx: Context, v: com.signalscope.store.AreaHistory.Verdict) {
+        if (LiveState.net.value.transport == "WIFI") return
+        val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
+        channel(nm)
+        val text = "Next to here, around this time of day, ${(v.share * 100).toInt()} % of the " +
+            "readings this phone has taken were too low for data to work. Based on " +
+            "${v.samples} of your own readings."
+        nm.notify(
+            AHEAD_ID,
+            Notification.Builder(ctx, CHANNEL)
+                .setContentTitle("Poor data area ahead")
+                .setContentText(text)
+                .setStyle(Notification.BigTextStyle().bigText(text))
+                .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
+                .setOnlyAlertOnce(true)
+                .setAutoCancel(true)
+                .build()
+        )
+    }
+
     /** Forget everything. Used when collection stops, so a restart does not announce a stale state. */
     @Synchronized
     fun reset() {
-        window.clear(); changedAt = 0L; _state.value = Ui()
+        window.clear(); changedAt = 0L; lastAhead = 0L; _state.value = Ui()
     }
 
     /**
@@ -117,13 +157,7 @@ object AreaState {
         if (LiveState.net.value.transport == "WIFI") return
 
         val nm = ctx.getSystemService(NotificationManager::class.java) ?: return
-        nm.createNotificationChannel(
-            NotificationChannel(CHANNEL, "Data area", NotificationManager.IMPORTANCE_LOW).apply {
-                description = "Entering and leaving places where mobile data does not work well"
-                enableVibration(false)
-                setSound(null, null)
-            }
-        )
+        channel(nm)
         val pi = PendingIntent.getActivity(
             ctx, 1,
             Intent(ctx, MainActivity::class.java)
@@ -148,6 +182,16 @@ object AreaState {
                 .setOnlyAlertOnce(true)
                 .setAutoCancel(true)
                 .build()
+        )
+    }
+
+    private fun channel(nm: NotificationManager) {
+        nm.createNotificationChannel(
+            NotificationChannel(CHANNEL, "Data area", NotificationManager.IMPORTANCE_LOW).apply {
+                description = "Entering and leaving places where mobile data does not work well"
+                enableVibration(false)
+                setSound(null, null)
+            }
         )
     }
 
