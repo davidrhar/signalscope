@@ -16,6 +16,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.isActive
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -170,6 +172,21 @@ class CollectorService : LifecycleService() {
         // privileged channel list, so this degrades to widths when Shizuku is not available.
         runCatching { CarrierAggregation.start(this, io) }
 
+        // Keep the line on screen honest. Rebuilt when the verdict changes, or when the share
+        // moves by ten points -- not on every reading, which would be several a second for a
+        // number nobody is watching that closely.
+        io.launch {
+            AreaState.state
+                .map { Triple(it.poor, it.share == null, ((it.share ?: 0.0) * 10).toInt()) }
+                .distinctUntilChanged()
+                .collect {
+                    runCatching {
+                        getSystemService(NotificationManager::class.java)
+                            ?.notify(NOTIF_ID, buildNotification(degradedNote()))
+                    }
+                }
+        }
+
         LiveState.running.value = true
         LiveState.counters.value = LiveState.counters.value.copy(
             startedElapsed = SystemClock.elapsedRealtime()
@@ -266,7 +283,7 @@ class CollectorService : LifecycleService() {
         // From the background the attempt simply fails and the current type is kept.
         if (heldType != ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION && hasLocation()) {
             runCatching {
-                startForeground(NOTIF_ID, buildNotification("collecting"),
+                startForeground(NOTIF_ID, buildNotification(null),
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION)
                 heldType = ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
                 LiveState.degraded.value = null
@@ -283,6 +300,13 @@ class CollectorService : LifecycleService() {
 
     /** The foreground type currently held, so a later start can tell whether to upgrade. */
     @Volatile private var heldType = 0
+
+    /** What is NOT working, for the status line. Null when everything is. */
+    private fun degradedNote(): String? = when (heldType) {
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION -> null
+        ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE -> "position paused"
+        else -> "reduced"
+    }
 
     /**
      * Start in the foreground with the best type the current context allows.
@@ -313,9 +337,9 @@ class CollectorService : LifecycleService() {
         }
         for ((type, degraded) in attempts) {
             val note = when (type) {
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION -> "collecting"
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE -> "collecting · position paused"
-                else -> "collecting · reduced"
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION -> null
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE -> "position paused"
+                else -> "reduced"
             }
             val ok = runCatching { startForeground(NOTIF_ID, buildNotification(note), type) }.isSuccess
             if (ok) {
@@ -359,13 +383,44 @@ class CollectorService : LifecycleService() {
         super.onDestroy()
     }
 
-    private fun buildNotification(text: String): Notification {
+    /**
+     * The one line that is always on screen, so it should say something worth the space.
+     *
+     * It used to read "SignalScope collecting / collecting", which is the app's name, a word, and
+     * then the same word again. Collecting is not news: the notification exists only while the
+     * service runs, and the service running IS collecting -- stop it and this disappears, which is
+     * what being snoozed looks like. So the title says what the app is for and the line below says
+     * what it has found, which is the only part that changes.
+     *
+     * @param degraded what is NOT working, or null when everything is. Never what is.
+     */
+    private fun buildNotification(degraded: String?): Notification {
         val nm = getSystemService(NotificationManager::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             nm.createNotificationChannel(
-                NotificationChannel(CHANNEL, "Collection", NotificationManager.IMPORTANCE_LOW)
-                    .apply { description = "SignalScope background collection" }
+                NotificationChannel(CHANNEL, "Monitoring", NotificationManager.IMPORTANCE_LOW)
+                    .apply { description = "The ongoing quality monitor" }
             )
+        }
+        val area = AreaState.state.value
+        val short = when {
+            area.share == null -> "Measuring — not enough readings yet"
+            area.poor -> "Bad zone — potential data issue"
+            else -> "Good zone"
+        } + (degraded?.let { " · $it" } ?: "")
+        // The long form only appears when the shade is expanded, so it can afford the sentence
+        // the short one cannot. The percentage is there because "bad" is a claim and this is the
+        // evidence for it.
+        val long = when {
+            area.share == null ->
+                "Watching signal quality. A verdict needs a few minutes of readings."
+            area.poor ->
+                "${(area.share!! * 100).toInt()} % of the last ten minutes of readings were too " +
+                    "low for data to work reliably. Wi-Fi avoids this, and moving a short " +
+                    "distance may hand you to another mast."
+            else ->
+                "Signal quality here is good enough for data to work. " +
+                    "${(area.share!! * 100).toInt()} % of recent readings were below that line."
         }
         // Class.forName() here was a string reference to a class we can name directly: it threw
         // ClassNotFoundException under any rename, and the throw happened inside onCreate() where
@@ -383,11 +438,13 @@ class CollectorService : LifecycleService() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
         return Notification.Builder(this, CHANNEL)
-            .setContentTitle("SignalScope collecting")
-            .setContentText(text)
+            .setContentTitle("Monitoring quality")
+            .setContentText(short)
+            .setStyle(Notification.BigTextStyle().bigText(long))
             .setSmallIcon(android.R.drawable.stat_sys_data_bluetooth)
             .setContentIntent(pi)
             .setOngoing(true)
+            .setOnlyAlertOnce(true)
             .build()
     }
 
