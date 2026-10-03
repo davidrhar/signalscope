@@ -138,10 +138,13 @@ android {
     buildTypes {
         debug { isMinifyEnabled = false }
         release {
-            // R8 stays off for now. Room, MapLibre and Shizuku all reach for classes reflectively
-            // and shrinking them needs a keep-rule pass that has not been done or tested; a release
-            // that crashes only on other people's phones is worse than a larger APK.
-            isMinifyEnabled = false
+            // R8 on, resource shrinking off. See app/proguard-rules.pro for both decisions: Play
+            // asks for DEX obfuscation by Feb 2027, and shrinking resources would add a second
+            // silent failure mode for a size win this app cannot collect anyway -- two thirds of
+            // the download is MapLibre's native library and the basemap.
+            isMinifyEnabled = true
+            isShrinkResources = false
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             // Null when no keystore is configured, which leaves the APK unsigned rather than
             // silently falling back to the debug key -- the exact substitution that caused the
             // update problem in the first place.
