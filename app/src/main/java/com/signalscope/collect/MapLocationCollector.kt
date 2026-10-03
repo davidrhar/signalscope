@@ -188,10 +188,49 @@ object MapLocationCollector {
         if (owners.isEmpty()) endUpdates()
     }
 
+    /**
+     * Whether the phone will give us a position at all, and why not when it will not.
+     *
+     * Two different failures that look identical from here and need opposite fixes from the
+     * person: the app not being allowed to ask, and the phone having location switched off for
+     * everything. Only the second is reached through the system Location setting.
+     */
+    fun blockedReason(ctx: Context): String? = when {
+        !hasPermission(ctx) -> "location permission not granted"
+        runCatching {
+            ctx.getSystemService(LocationManager::class.java)?.isLocationEnabled == false
+        }.getOrDefault(false) -> "location is switched off on this phone"
+        else -> null
+    }
+
+    /**
+     * Re-examine something that was true when the listener was created and may not be now.
+     *
+     * [beginUpdates] returns early when a listener already exists, so permission was checked once
+     * and never again. Turn location off afterwards and the platform simply stops delivering: no
+     * callback, no error, `running` left true and no note. The map then showed "waiting for a
+     * position fix -- indoors this can take a minute" for twenty-eight minutes, which was a
+     * reassurance about a state the app was not in. This is what notices.
+     */
+    @Synchronized
+    fun recheck(ctx: Context) {
+        val why = blockedReason(ctx)
+        if (why != null) {
+            if (listener != null) endUpdates()
+            if (_state.value.running || _state.value.note != why) {
+                _state.value = _state.value.copy(running = false, note = why)
+            }
+            return
+        }
+        // Unblocked again, and somebody still wants position: pick it back up without waiting for
+        // the Map tab to be closed and reopened.
+        if (listener == null && owners.isNotEmpty()) beginUpdates(ctx)
+    }
+
     private fun beginUpdates(ctx: Context) {
         if (listener != null) return
-        if (!hasPermission(ctx)) {
-            _state.value = _state.value.copy(running = false, note = "location permission not granted")
+        blockedReason(ctx)?.let {
+            _state.value = _state.value.copy(running = false, note = it)
             return
         }
         val manager = ctx.getSystemService(LocationManager::class.java) ?: return

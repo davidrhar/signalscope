@@ -218,12 +218,18 @@ private fun AppHead(
             Text(
                 when {
                     tab != Tab.LIVE -> tab.subtitle
+                    // A placeholder subscription is slot -1, which rendered as "default - SIM 0":
+                    // a SIM that does not exist, stated with the same confidence as a real one.
+                    // Say what is actually missing instead. Found on somebody else's phone, where
+                    // it is the first thing they see.
+                    s != null && s.slot < 0 ->
+                        "no SIM readable — grant phone permission, or reopen the app"
                     // Serving network first; the card's home network only as a label, and only when
                     // it differs -- which is exactly when a SIM is roaming.
                     s != null -> "${s.carrier} · ${s.plmn}" +
                         (if (s.simPlmn != "—" && s.simPlmn != s.plmn) " (home ${s.simPlmn})" else "") +
                         " · SIM ${s.slot + 1}"
-                    else -> "no subscription"
+                    else -> "no subscription — grant phone permission"
                 },
                 color = T.Faint, fontSize = 11.sp, fontFamily = Mono, maxLines = 1
             )
@@ -343,7 +349,7 @@ private fun Hero(s: SimState, sp: SubProfile?) {
             )
             if (fullBarsBadSinr) {
                 Spacer(Modifier.height(4.dp))
-                Text("full bars · SINR ${s.rssnr} dB — power is fine, quality is not",
+                Text("${s.level ?: 0} of 4 bars · SINR ${s.rssnr} dB — power is fine, quality is not",
                     color = T.Bad, fontSize = 10.sp, fontWeight = FontWeight.Bold)
             }
         }

@@ -83,9 +83,15 @@ class TelephonyCollector(
     private fun enumerate() {
         val subs = try { sm?.activeSubscriptionInfoList.orEmpty() } catch (_: SecurityException) { emptyList() }
         if (subs.isEmpty()) {
-            // Nothing readable yet. Register the default subscription so the screen shows
-            // something, and leave the listener above to correct it the moment the real list
-            // arrives -- rather than latching this placeholder as the answer.
+            // Nothing readable yet. Register the default subscription so something collects, and
+            // leave the listener above to correct it when the real list arrives.
+            //
+            // The listener alone is not enough, which took a second phone to find out. It fires on
+            // registration and on CHANGE. If the service is restarted -- START_STICKY, after a
+            // background kill -- at a moment when the list reads empty, the first delivery is
+            // empty and the SIM list never subsequently changes, so nothing fires again and this
+            // placeholder becomes permanent. [pollOnce] re-enumerates while one is registered,
+            // which is the only thing that closes that window.
             if (callbacks.isEmpty()) {
                 registerFor(SubscriptionManager.getDefaultSubscriptionId(), -1, "default")
             }
@@ -674,6 +680,12 @@ class TelephonyCollector(
     private suspend fun pollOnce() {
         val subs = LiveState.sims.value.keys.ifEmpty { return }
         tick++
+
+        // A placeholder subscription is a known-wrong answer, so keep asking for the real one.
+        // Slot -1 is its signature; it is what renders as "default - SIM 0".
+        if (tick % 4 == 0L && LiveState.sims.value.values.any { it.slot < 0 }) {
+            runCatching { enumerate() }
+        }
 
         // Look-ahead, about once a minute rather than on every tick: it is a query over seven bins
         // and the answer cannot change faster than the phone can walk out of a 460 m cell. On the

@@ -153,6 +153,13 @@ private suspend fun wipe(ctx: Context) {
     // is exactly the kind of thing someone pressing this button means to be rid of.
     runCatching { Networks.forgetLearned(ctx) }
     runCatching { Submission.forget(ctx) }
+    // Preference files from features that no longer exist. Nothing reads them, which is exactly
+    // why they survived every wipe: a file nobody references is a file nobody remembers to empty,
+    // and "delete everything collected" has to mean everything.
+    listOf("phase_a", "warmth_exp", "keepalive_exp", "map_fix_import").forEach { name ->
+        runCatching { ctx.getSharedPreferences(name, Context.MODE_PRIVATE).edit().clear().apply() }
+        runCatching { ctx.filesDir.resolveSibling("shared_prefs").resolve("$name.xml").delete() }
+    }
     runCatching { ctx.filesDir.resolve("rollup").deleteRecursively() }
     runCatching { ctx.filesDir.resolve("export").deleteRecursively() }
     Consent.revoke(ctx)

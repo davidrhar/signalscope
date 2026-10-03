@@ -940,6 +940,8 @@ object CellProbe {
         val complete: Int,
         val upFailures: Int,
         val downFailures: Int,
+        /** Pairs that lost at least one half. Never greater than [pairs]. */
+        val incomplete: Int,
         val downMedianMs: Int?,
         val upMedianMs: Int?,
         /** Geometric mean of up/down time for the same payload, with a 95 % interval. */
@@ -994,6 +996,10 @@ object CellProbe {
         }
         val upFail = pairs.count { it.second.outcome != "OK" }
         val downFail = pairs.count { it.first.outcome != "OK" }
+        // Pairs that lost AT LEAST ONE half. Not upFail + downFail: a pair where both halves
+        // failed is in both counts, so the sum can exceed the number of pairs -- which is how the
+        // panel came to read "67 of 64 paired tests".
+        val incomplete = pairs.count { it.first.outcome != "OK" || it.second.outcome != "OK" }
         val downFirstFrac = if (pairs.isEmpty()) 0.0 else downFirst / pairs.size.toDouble()
 
         fun median(v: List<Int>) = if (v.isEmpty()) null else v.sorted()[v.size / 2]
@@ -1063,7 +1069,7 @@ object CellProbe {
 
         return AsymSummary(
             pairs = pairs.size, complete = complete.size,
-            upFailures = upFail, downFailures = downFail,
+            upFailures = upFail, downFailures = downFail, incomplete = incomplete,
             downMedianMs = downMed, upMedianMs = upMed,
             ratio = ci?.first, ratioLo = ci?.second, ratioHi = ci?.third,
             downFirstFraction = downFirstFrac, report = report

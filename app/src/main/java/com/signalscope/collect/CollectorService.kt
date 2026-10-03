@@ -256,6 +256,11 @@ class CollectorService : LifecycleService() {
                 if (want) MapLocationCollector.startForService(this@CollectorService)
                 else MapLocationCollector.stopForService()
 
+                // Permission and the system Location switch are both checked once, when the
+                // listener is created, and either can be turned off afterwards without the
+                // platform saying anything. This is the only thing that notices.
+                runCatching { MapLocationCollector.recheck(this@CollectorService) }
+
                 // Logged because the interesting branch cannot be exercised from a wireless-adb
                 // session -- turning Wi-Fi off to test it is also what ends the session. So the
                 // decision states itself, and the next real excursion proves the gate opened.

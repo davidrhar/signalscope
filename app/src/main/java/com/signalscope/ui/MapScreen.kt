@@ -1195,14 +1195,51 @@ private fun EmptyState(
         }
         ERow("needed", "${MapBinBuilder.N_LOCAL} samples in one bin")
         Spacer(Modifier.height(8.dp))
+        val ctx = LocalContext.current
+        // Asked here rather than trusted from state: the collector checks it when it starts the
+        // listener and the person can change it at any moment afterwards.
+        val blocked = remember(fix.running, fix.fixCount) {
+            runCatching { MapLocationCollector.blockedReason(ctx) }.getOrNull()
+        }
         when {
+            blocked != null -> {
+                Text(
+                    blocked + ". Without it this map cannot be built — everything else still works.",
+                    color = T.Bad, fontSize = 10.sp, lineHeight = 14.sp
+                )
+                Spacer(Modifier.height(7.dp))
+                // Two different destinations, because they are two different faults and the
+                // person cannot be expected to know which one they are in.
+                Btn(
+                    if (blocked.startsWith("location is switched off")) "Open location settings"
+                    else "Open app permissions",
+                    ghost = true
+                ) {
+                    val i = if (blocked.startsWith("location is switched off"))
+                        android.content.Intent(android.provider.Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+                    else android.content.Intent(
+                        android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        android.net.Uri.fromParts("package", ctx.packageName, null)
+                    )
+                    runCatching { ctx.startActivity(i.addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
+                }
+            }
             !fix.running && fix.note != null ->
                 Text(fix.note!!, color = T.Bad, fontSize = 10.sp, fontFamily = Mono)
             m.fixRows == 0 ->
+                // "A minute" stops being true after a while, and a reassurance that outlives the
+                // thing it was reassuring about is just a wrong answer with a friendly tone.
                 Text(
-                    "Waiting for a position fix — fused provider, balanced accuracy. " +
-                        "Indoors this can take a minute.",
-                    color = T.Faint, fontSize = 10.sp, lineHeight = 14.sp
+                    if (m.spanMs > 10 * 60_000L)
+                        "No position in ${dur(m.spanMs)} — location is allowed and switched on, so " +
+                            "this is the phone failing to get a fix. Indoors on mobile data with " +
+                            "Wi-Fi off is the usual cause: turning Wi-Fi on, even without " +
+                            "connecting, is normally enough."
+                    else
+                        "Waiting for a position fix — fused provider, balanced accuracy. " +
+                            "Indoors this can take a minute.",
+                    color = if (m.spanMs > 10 * 60_000L) T.Warn else T.Faint,
+                    fontSize = 10.sp, lineHeight = 14.sp
                 )
             m.unlocated > 0 ->
                 Text(

@@ -723,7 +723,7 @@ object PlainLanguage {
             ).copy(numbers = numbers)
             r.contains("INCOMPLETE") -> Verdict(
                 headline = "One direction is failing outright, so there is nothing to compare.",
-                body = "${a.upFailures + a.downFailures} of ${a.pairs} paired tests lost a half " +
+                body = "${a.incomplete} of ${a.pairs} paired tests lost a half " +
                     "(sending ${a.upFailures}, receiving ${a.downFailures}). That split is the " +
                     "finding. Timing only the tests that survived is exactly how a broken " +
                     "direction comes out looking healthy, so no ratio is given.",
