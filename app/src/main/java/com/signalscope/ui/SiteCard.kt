@@ -102,18 +102,28 @@ private fun pct(f: Double) = "%.0f %%".format(f * 100)
 @Composable
 fun AreaCard() {
     val s by AreaState.state.collectAsStateWithLifecycle()
-    if (!s.poor) return
+    // Keyed on the grade, not on `poor`. `poor` is held by hysteresis all the way down to 30 %,
+    // so keying the card on it meant announcing that data was "unlikely to work well" about a
+    // window that had already recovered to patchy. Claims follow the measurement; only the
+    // notification follows the hysteresis.
+    val bad = s.grade == AreaState.Grade.BAD
+    val marginal = s.grade == AreaState.Grade.MARGINAL
+    if (!bad && !marginal) return
+
     SecHead("This place", "from the last ten minutes")
-    AccentCard(T.Bad) {
+    AccentCard(if (bad) T.Bad else T.Warn) {
         Text(
-            "Data is unlikely to work well here.",
+            if (bad) "Data is unlikely to work well here." else "Data may stall here.",
             color = T.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold, lineHeight = 19.sp
         )
         Spacer(Modifier.height(7.dp))
         Text(
             (s.share?.let { "${pct(it)} of the readings in the last ten minutes were below the " +
                 "level where calls and video stop working. " } ?: "") +
-                "Wi-Fi avoids this entirely, and moving a short distance may hand you to another mast.",
+                if (bad)
+                    "Wi-Fi avoids this entirely, and moving a short distance may hand you to another mast."
+                else
+                    "Not enough to call this a bad area, but enough to interrupt a call or a video.",
             color = T.Dim, fontSize = 12.5.sp, lineHeight = 17.sp
         )
     }

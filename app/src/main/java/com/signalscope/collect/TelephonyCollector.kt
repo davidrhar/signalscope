@@ -810,8 +810,15 @@ class TelephonyCollector(
 
                 // Every reading that is good enough to store is good enough to judge the area by,
                 // and this is the single point they all pass through.
-                runCatching { AreaState.offer(ctx, nowWall, sig.rssnr) }
-                runCatching { com.signalscope.store.AreaHistory.offer(ctx, nowWall, sig.rssnr) }
+                // rssnr OR ssSinr. Both are a signal-to-noise-and-interference ratio in dB and
+                // zero means the same thing on each. Passing only the LTE one meant that on a
+                // 5G standalone connection nothing was ever offered, the window never filled, and
+                // the app sat on "not enough readings yet" for ever -- the feature silently did
+                // not exist on the technology it is most needed for. The rest of this file
+                // already pairs the two this way.
+                val sinr = sig.rssnr ?: sig.ssSinr
+                runCatching { AreaState.offer(ctx, nowWall, sinr) }
+                runCatching { com.signalscope.store.AreaHistory.offer(ctx, nowWall, sinr) }
 
                 dao.insertRadio(
                     RadioSample(

@@ -177,7 +177,7 @@ class CollectorService : LifecycleService() {
         // number nobody is watching that closely.
         io.launch {
             AreaState.state
-                .map { Triple(it.poor, it.share == null, ((it.share ?: 0.0) * 10).toInt()) }
+                .map { Triple(it.grade, it.poor, ((it.share ?: 0.0) * 10).toInt()) }
                 .distinctUntilChanged()
                 .collect {
                     runCatching {
@@ -408,24 +408,36 @@ class CollectorService : LifecycleService() {
             )
         }
         val area = AreaState.state.value
-        val short = when {
-            area.share == null -> "Measuring — not enough readings yet"
-            area.poor -> "Bad zone — potential data issue"
-            else -> "Good zone"
+        // The GRADE, not the hysteretic state. The old version read this off `poor`, which is the
+        // switching decision, so a window with 69 % of its readings below usable was announced as
+        // "Good zone" -- the app's one always-visible line, making a confident claim that was
+        // false. There is now a middle, because there is a middle.
+        val short = when (area.grade) {
+            AreaState.Grade.UNKNOWN -> "Measuring — not enough readings yet"
+            AreaState.Grade.BAD -> "Bad zone — potential data issue"
+            AreaState.Grade.MARGINAL -> "Patchy — data may stall here"
+            AreaState.Grade.GOOD -> "Good zone"
         } + (degraded?.let { " · $it" } ?: "")
         // The long form only appears when the shade is expanded, so it can afford the sentence
         // the short one cannot. The percentage is there because "bad" is a claim and this is the
         // evidence for it.
-        val long = when {
-            area.share == null ->
+        // Every one of these states says the share it is based on, so the claim and its evidence
+        // never appear apart.
+        val pc = area.share?.let { (it * 100).toInt() }
+        val long = when (area.grade) {
+            AreaState.Grade.UNKNOWN ->
                 "Watching signal quality. A verdict needs a few minutes of readings."
-            area.poor ->
-                "${(area.share!! * 100).toInt()} % of the last ten minutes of readings were too " +
-                    "low for data to work reliably. Wi-Fi avoids this, and moving a short " +
-                    "distance may hand you to another mast."
-            else ->
-                "Signal quality here is good enough for data to work. " +
-                    "${(area.share!! * 100).toInt()} % of recent readings were below that line."
+            AreaState.Grade.BAD ->
+                "$pc % of the last ten minutes of readings were too low for data to work " +
+                    "reliably. Wi-Fi avoids this, and moving a short distance may hand you to " +
+                    "another mast."
+            AreaState.Grade.MARGINAL ->
+                "$pc % of the last ten minutes of readings were below the level where data works " +
+                    "reliably. Enough to stall a call or a video, not enough to call this a bad " +
+                    "area."
+            AreaState.Grade.GOOD ->
+                "Signal quality here is good enough for data to work. $pc % of recent readings " +
+                    "were below that line."
         }
         // Class.forName() here was a string reference to a class we can name directly: it threw
         // ClassNotFoundException under any rename, and the throw happened inside onCreate() where

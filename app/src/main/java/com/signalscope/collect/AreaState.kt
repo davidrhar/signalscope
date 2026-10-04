@@ -60,12 +60,31 @@ object AreaState {
     private const val CHANNEL = "area"
     private const val NOTIF_ID = 43
 
+    /**
+     * What is true now, which is not the same question as when to speak.
+     *
+     * [ENTER] and [LEAVE] exist to stop a notification flapping, and reading a label off the same
+     * boolean made the app state something false: at 69 % of readings below usable it had never
+     * crossed 0.70, so it was still reporting "Good zone" while two thirds of the last ten minutes
+     * were unusable. Hysteresis belongs on the EVENT. The description follows the measurement.
+     */
+    enum class Grade { UNKNOWN, GOOD, MARGINAL, BAD }
+
     data class Ui(
+        /** The hysteretic state. Drives notifications, and nothing that makes a claim. */
         val poor: Boolean = false,
         val since: Long = 0L,
         /** Share of the window below usable SINR, for the Live tab. Null before enough samples. */
         val share: Double? = null
-    )
+    ) {
+        /** What the window actually says right now, with no hysteresis in it. */
+        val grade: Grade get() = when {
+            share == null -> Grade.UNKNOWN
+            share >= ENTER -> Grade.BAD
+            share <= LEAVE -> Grade.GOOD
+            else -> Grade.MARGINAL
+        }
+    }
 
     private val _state = MutableStateFlow(Ui())
     val state: StateFlow<Ui> = _state
@@ -169,7 +188,8 @@ object AreaState {
             "Signal quality here is too low for data to work reliably. Wi-Fi avoids it; " +
                 "moving a short distance may hand you to another mast."
         } else {
-            "Data quality is back to normal" + (words(heldMs)?.let { " after $it" } ?: "") + "."
+            "Signal quality here is usable again" + (words(heldMs)?.let { ", after $it" } ?: "") +
+                (_state.value.share?.let { " — now ${(it * 100).toInt()} % of readings below the line." } ?: ".")
         }
         nm.notify(
             NOTIF_ID,
