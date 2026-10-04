@@ -17,7 +17,7 @@ import { join } from 'node:path';
 import { aggregate, sharedMap, MIN_CONTRIBUTORS, MIN_SAMPLES } from '../src/aggregate.js';
 
 const rec = (area, network, band, samples, week = '2026-W38') => ({
-  area, res: 8, network, band, samples,
+  area: String(area), res: 8, network, band, samples,
   observedMs: samples * 1000,
   rsrp: { '-100': Math.floor(samples / 2), '-90': Math.floor(samples / 2) },
   sinr: { '2': Math.floor(samples / 2), '8': Math.floor(samples / 2) },
@@ -49,7 +49,10 @@ const FIXTURES = [
 test('thresholds: only the qualifying cell publishes', () => {
   const { cells } = aggregate(FIXTURES);
   assert.equal(cells.length, 1, 'exactly one cell should clear both thresholds');
-  assert.equal(cells[0].area, 333);
+  // A STRING, and the test says so. A MapHex id does not survive being a JavaScript number,
+  // so an assertion that passes against 333 would pass against a corrupted id too.
+  assert.equal(cells[0].area, '333');
+  assert.equal(typeof cells[0].area, 'string');
   assert.equal(cells[0].contributors, 3);
   assert.equal(cells[0].samples, 600);
 });
@@ -117,4 +120,24 @@ test('names cover the published networks and nothing else', () => {
   // the names larger than the measurements by an order of magnitude.
   assert.equal(Object.keys(doc.names).length, published.size);
   assert.equal(doc.names['424-2'], undefined);
+});
+
+test('a v1 contribution, whose area is a number, is dropped rather than drawn', () => {
+  // The id was rounded by JSON.parse before it ever reached storage -- at the magnitude MapHex
+  // uses, to the nearest multiple of 1024 -- so it names a hexagon several hundred kilometres
+  // from where the measurement was taken. It cannot be repaired, and a measurement published at
+  // the wrong place is worse than one not published at all.
+  const numeric = bundle([{ ...rec(333, '525-10', '40', 200), area: 333 }]);
+  const { cells, dropped } = aggregate([numeric, numeric, numeric]);
+  assert.equal(dropped, 3);
+  assert.equal(cells.length, 0);
+});
+
+test('a real MapHex id survives the round trip intact', () => {
+  // The actual value observed on the server, which lost its low bits on the way in.
+  const id = '-6341066927791655000';
+  const r = (a) => ({ ...rec(0, '525-10', '40', 200), area: a });
+  const { cells } = aggregate([bundle([r(id)]), bundle([r(id)]), bundle([r(id)])]);
+  assert.equal(cells.length, 1);
+  assert.equal(cells[0].area, id, 'every digit, or the hexagon moves');
 });

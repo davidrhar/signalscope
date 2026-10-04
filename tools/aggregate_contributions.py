@@ -85,6 +85,12 @@ def main(argv):
         # person satisfy the threshold alone -- defeating the entire control.
         seen_here = set()
         for rec in doc.get("records", []):
+            # A numeric area is a v1 contribution, whose id was rounded by the server's JSON
+            # parser before it was ever stored -- it names a hexagon hundreds of kilometres from
+            # where it was measured and cannot be repaired. Dropped, exactly as aggregate.js
+            # drops it, because two implementations of one rule are only safe while they agree.
+            if not isinstance(rec.get("area"), str):
+                continue
             key = (rec["area"], rec["network"], rec["band"])
             cell = cells[key]
             if key not in seen_here:

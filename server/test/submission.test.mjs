@@ -25,7 +25,7 @@ const ID_A = 'a'.repeat(32);
 const ID_B = 'b'.repeat(32);
 
 const rec = (area, samples = 500) => ({
-  area, res: 8, network: '525-10', band: '40', samples,
+  area: String(area), res: 8, network: '525-10', band: '40', samples,
   observedMs: samples * 1000,
   rsrp: { '-100': samples }, sinr: { '2': samples }, week: '2026-W40',
 });

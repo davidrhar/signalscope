@@ -135,7 +135,10 @@ object SharedMap {
             val c = arr!!.getJSONObject(i)
             cells.add(
                 Cell(
-                    area = c.optLong("area"),
+                    // String first. optLong is the fallback for a snapshot published before
+                    // the ids were carried as text, whose values are wrong anyway -- read so the
+                    // document still parses, not because the number means anything.
+                    area = c.optString("area").toLongOrNull() ?: c.optLong("area"),
                     network = c.optString("network"),
                     band = c.optString("band"),
                     contributors = c.optInt("contributors"),

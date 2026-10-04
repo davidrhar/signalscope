@@ -43,7 +43,8 @@ import org.json.JSONObject
 object Contribution {
 
     const val FORMAT = "signalscope-contribution"
-    const val VERSION = 1
+    /** 2: `area` is a string. See the note on it in [build]. */
+    const val VERSION = 2
 
     /** ~460 m across. One step coarser than the finest the map draws for its owner. */
     const val SHARE_RES = 8
@@ -106,7 +107,19 @@ object Contribution {
             if (st.samples < MIN_SAMPLES) continue
             val (area, plmn, band) = key
             out.put(JSONObject().apply {
-                put("area", area)
+                // As TEXT, not as a number.
+                //
+                // A MapHex id uses the full 64-bit range, and the server is JavaScript, where
+                // every number is an IEEE-754 double. JSON.parse rounded each id to the nearest
+                // representable double -- a step of 1024 at this magnitude -- which left the tag
+                // and resolution intact and destroyed the low bits, where r lives. Every shared
+                // hexagon was placed up to several hundred kilometres from where it was measured,
+                // and the map drew them into the sea. Nothing in the pipeline noticed, because a
+                // corrupted id is still a perfectly valid-looking id.
+                //
+                // A string is never parsed as a number by anything downstream, which is the only
+                // version of this that cannot silently come back.
+                put("area", area.toString())
                 put("res", SHARE_RES)
                 put("network", plmn)
                 put("band", band)

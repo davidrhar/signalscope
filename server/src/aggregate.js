@@ -58,6 +58,7 @@ function mergeHist(into, src) {
  */
 export function aggregate(bundles) {
   const cells = new Map();
+  let dropped = 0;
 
   for (const doc of bundles) {
     if (!doc || doc.format !== 'signalscope-contribution') continue;
@@ -67,6 +68,16 @@ export function aggregate(bundles) {
     // control. This is the case the fixtures exercise explicitly.
     const seenHere = new Set();
     for (const rec of doc.records || []) {
+      /*
+       * A numeric area is a corrupted area, and is dropped rather than published.
+       *
+       * Version 1 of the contribution format sent the id as a JSON number, which this runtime
+       * cannot hold: it was rounded on parse and the hexagon it names is several hundred
+       * kilometres from where it was measured. Those ids cannot be repaired -- the information is
+       * gone -- so the only honest thing is to not draw them. Publishing a measurement at the
+       * wrong place is worse than publishing nothing, because nothing is visibly nothing.
+       */
+      if (typeof rec.area !== 'string') { dropped++; continue; }
       const key = `${rec.area}|${rec.network}|${rec.band}`;
       let cell = cells.get(key);
       if (!cell) {
@@ -90,7 +101,17 @@ export function aggregate(bundles) {
     if (cell.contributors < MIN_CONTRIBUTORS || cell.samples < MIN_SAMPLES) { withheld++; continue; }
     const [area, network, band] = key.split('|');
     published.push({
-      area: Number(area), network, band,
+      /*
+       * A STRING, never Number().
+       *
+       * A MapHex id uses the full 64-bit range and this is JavaScript, where every number is an
+       * IEEE-754 double. Number() on one rounds it to the nearest representable double -- a step
+       * of 1024 at that magnitude -- which keeps the tag and resolution and destroys the low bits
+       * where r lives. Every published hexagon was landing up to several hundred kilometres from
+       * where it was measured. It is an opaque key here and nothing in this file does arithmetic
+       * on it, so there was never a reason to make it a number in the first place.
+       */
+      area, network, band,
       contributors: cell.contributors,
       samples: cell.samples,
       observedMs: cell.observedMs,
@@ -104,7 +125,7 @@ export function aggregate(bundles) {
     });
   }
 
-  return { cells: published, seen: cells.size, withheld };
+  return { cells: published, seen: cells.size, withheld, dropped };
 }
 
 /**
@@ -138,7 +159,7 @@ function normalisePlmn(plmn) {
 
 /** The published document, exactly as the app will fetch it. */
 export function sharedMap(bundles) {
-  const { cells, seen, withheld } = aggregate(bundles);
+  const { cells, seen, withheld, dropped } = aggregate(bundles);
   return {
     format: 'signalscope-shared-map',
     version: 1,
@@ -148,6 +169,8 @@ export function sharedMap(bundles) {
     generated: new Date().toISOString().slice(0, 10),
     cellsSeen: seen,
     cellsWithheld: withheld,
+    /** Records from clients that sent the area as a number, which this runtime cannot hold. */
+    recordsDropped: dropped,
     cells,
     names: namesFor(cells),
     namesSource: PLMN_NAMES_DOC._source,
