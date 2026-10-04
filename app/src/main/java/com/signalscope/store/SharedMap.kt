@@ -67,6 +67,30 @@ object SharedMap {
     }
 
     /** The last copy written to disk, or null. Cheap: no network, safe on startup. */
+    private const val PREFS = "shared_map"
+    private const val KEY_LAYER = "layer_on"
+
+    /**
+     * Whether to draw everyone else's measurements. On unless switched off.
+     *
+     * It defaulted to off, behind a chip that sits past the right edge of a 1080-wide screen in a
+     * row that scrolls. The result was that other people contributed for two days and it took a
+     * query against the server to notice, because nothing in the app ever showed their data. The
+     * whole point of the shared map is seeing what other people measured; hiding it by default
+     * made the server, the k-anonymity floor and the contribution format into things that worked
+     * and were never seen.
+     *
+     * There is no privacy argument for the old default either way -- this is a public document
+     * anybody can fetch, and drawing it says nothing about the person drawing it. An explicit
+     * choice to turn it off is remembered; the default is not a choice.
+     */
+    fun layerOn(ctx: Context): Boolean =
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(KEY_LAYER, true)
+
+    fun setLayerOn(ctx: Context, on: Boolean) {
+        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_LAYER, on).apply()
+    }
+
     suspend fun cached(ctx: Context): Snapshot? = withContext(Dispatchers.IO) {
         val f = File(ctx.filesDir, CACHE)
         if (!f.exists()) return@withContext null

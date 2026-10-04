@@ -100,7 +100,10 @@ fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
     /** PLMN to show alone, or null for every network. */
     var onlyNetwork by remember { mutableStateOf<String?>(null) }
     /** Everyone else's measurements, off until asked for. */
-    var crowdOn by remember { mutableStateOf(false) }
+    // On unless the person has turned it off. See SharedMap.layerOn for why the old default was
+    // wrong: other people's measurements were invisible behind an off-by-default chip that sits
+    // off the right edge of the screen.
+    var crowdOn by remember { mutableStateOf(SharedMap.layerOn(ctx)) }
     var crowd by remember { mutableStateOf<SharedMap.Snapshot?>(null) }
     var crowdBusy by remember { mutableStateOf(false) }
     var selected by remember { mutableStateOf<Bin?>(null) }
@@ -336,7 +339,7 @@ fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
                         else -> "Shared map"
                     },
                     crowdOn
-                ) { crowdOn = !crowdOn }
+                ) { crowdOn = !crowdOn; SharedMap.setLayerOn(ctx, crowdOn) }
             }
             if (networks.size > 1) {
                 Row(
@@ -380,7 +383,7 @@ fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
             // under the status strip rather than floating over it, so the two can never disagree
             // on screen about what has actually been measured.
             if (m != null && m.isEmpty) {
-                EmptyState(m, fix, Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
+                EmptyState(m, fix, crowdOn, crowd, Modifier.padding(horizontal = 10.dp, vertical = 4.dp))
             }
         }
 
@@ -1174,6 +1177,8 @@ private fun LayerPanel(m: MapModel, layer: MapLayer) {
 private fun EmptyState(
     m: MapModel,
     fix: MapLocationCollector.FixState,
+    crowdOn: Boolean,
+    crowd: SharedMap.Snapshot?,
     modifier: Modifier = Modifier
 ) {
     Glass(modifier) {
@@ -1204,6 +1209,19 @@ private fun EmptyState(
             ERow("observed", "${dur(m.observedMs)} of ${dur(m.spanMs)} · ${pct(it)}", T.Faint)
         }
         ERow("needed", "${MapBinBuilder.N_LOCAL} samples in one bin")
+        // Silence here used to mean two different things -- nobody has contributed, and nobody
+        // has contributed NEAR YOU -- and the map drew the same nothing for both.
+        ERow(
+            "shared map",
+            when {
+                !crowdOn -> "layer off"
+                crowd == null -> "not loaded yet"
+                crowd.cells.isEmpty() ->
+                    "nothing published yet · an area needs ${crowd.minContributors} phones"
+                else -> "${crowd.cells.size} areas from other phones · ${crowd.generated}"
+            },
+            T.Faint
+        )
         Spacer(Modifier.height(8.dp))
         val ctx = LocalContext.current
         // Asked here rather than trusted from state: the collector checks it when it starts the

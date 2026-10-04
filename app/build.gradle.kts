@@ -114,8 +114,8 @@ android {
         // versionCode must increase by one on every build handed to anyone, and must never go
         // backwards: Android refuses to install an older code over a newer one. versionName is for
         // humans and carries no rules. 2 is the first release-signed build.
-        versionCode = 7
-        versionName = "0.5.2"
+        versionCode = 9
+        versionName = "0.6.1"
 
         // MapLibre ships native libs for four ABIs, which took the debug APK to ~75 MB.
         // The reference device is arm64; keep installs over wireless adb quick.
