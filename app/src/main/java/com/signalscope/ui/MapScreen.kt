@@ -416,9 +416,19 @@ fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
                     Chip(if (shareOpen) "Hide share" else "Share", shareOpen) {
                         shareOpen = !shareOpen; if (shareOpen) legendOpen = false
                     }
-                    here?.let { (lat, lng) ->
+                    // Always present, never silently absent.
+                    //
+                    // It used to render only when a position existed, so on a phone with location
+                    // switched off the control simply was not there -- and the owner's conclusion
+                    // was "some phones have this button and mine does not", which is both true and
+                    // useless. With no position it opens the detail panel instead, which is where
+                    // the reason and the settings button already live.
+                    run {
                         Spacer(Modifier.width(6.dp))
-                        Chip("My location", false) { mapState.recentre(lat, lng) }
+                        Chip("My location", false) {
+                            val h = here
+                            if (h != null) mapState.recentre(h.first, h.second) else detailOpen = true
+                        }
                     }
                 }
                 Spacer(Modifier.height(6.dp))

@@ -37,15 +37,24 @@ import androidx.compose.ui.text.font.FontFamily
  *
  * ## The battery figure is measured, not guessed
  *
- * "A little battery" was the original wording and it was wrong. `dumpsys batterystats` on the
- * reference device put the foreground service at **231 mAh over 11h 14m** -- 20.6 mAh an hour, or
- * about 0.41% an hour of its 5000 mAh battery, which is roughly a tenth of a full charge a day and
- * made this the third-heaviest app on the phone. Someone told "a little" and then losing 10% a day
- * has been misled about the only cost they can feel.
+ * "A little battery" was the original wording and it was wrong. It is now stated as a range,
+ * because two measurements on the same device differ by more than three times and both are real:
  *
- * One device, one 11-hour window, on a day of unusually heavy use, so the figure is stated as
- * "roughly" and rounded down rather than presented as precise. Re-measure with:
- * `adb shell "dumpsys batterystats | sed -n '/Estimated power use/,/^$/p' | grep u0aNNN"`.
+ *   2026-09  231 mAh over 11h 14m  = 20.6 mAh/h = 0.41 %/h  ~ 10 % of a 5000 mAh battery a day
+ *   2026-10   14.6 mAh over 2h 22m =  6.2 mAh/h = 0.12 %/h  ~  3 % a day
+ *
+ * The gap is not an error in either. The first was a day of travelling on poor signal, which is
+ * when this app works hardest: more cell changes, more probing, more time with the radio awake.
+ * The second was a stationary phone at home on Wi-Fi -- where, additionally, most connection tests
+ * were being refused at the bind and therefore never ran at all, which flatters the figure.
+ *
+ * So the honest statement is a range with its cause attached, rather than a single number that
+ * will be wrong for most people most of the time. Quoting the low end would understate it for
+ * exactly the person who most needs to know; quoting the high end would scare off someone whose
+ * phone sits on a desk.
+ *
+ * Re-measure with:
+ * `adb shell "dumpsys batterystats --charged | grep 'UID u0aNNN'"` against "Time on battery".
  *
  * ## What it does not claim
  *
@@ -124,7 +133,9 @@ fun ConsentScreen(onAccept: () -> Unit, onDecline: () -> Unit) {
             "permission, because Android reports the mast to any app with phone permission.")
         Body("Your position is never stored. Nothing is uploaded anywhere. Detailed records are " +
             "deleted after 30 days.")
-        Body("Collecting costs roughly 10% of a full battery a day, and up to about 1 MB of " +
+        Body("Collecting costs somewhere between about 3% and 10% of a full battery a day — " +
+            "nearer the low end on a phone that stays put, nearer the high end while travelling " +
+            "on poor signal, which is when it has the most to measure — and up to about 1 MB of " +
             "mobile data. It runs constantly, so it is one of the heavier apps on a phone.")
 
         Spacer(Modifier.height(18.dp))
