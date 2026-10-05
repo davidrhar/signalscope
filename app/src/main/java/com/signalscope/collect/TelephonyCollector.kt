@@ -204,9 +204,11 @@ class TelephonyCollector(
         //
         // getCellConnectionStatus() has existed since API 28 and this app requires 31. The
         // registered-cell fallback stays for a modem that reports no connection status at all.
+        val primaries = cellInfo.count { it.cellConnectionStatus == CellInfo.CONNECTION_PRIMARY_SERVING }
         val serving = cellInfo.firstOrNull { it.cellConnectionStatus == CellInfo.CONNECTION_PRIMARY_SERVING }
             ?: cellInfo.firstOrNull { it.isRegistered }
-            ?: return base.copy(servingReported = false)
+            ?: return base.copy(servingReported = false, primaryCells = primaries)
+        val connStatus = runCatching { serving.cellConnectionStatus }.getOrNull()
         val ageMs = (SystemClock.elapsedRealtime() - serving.timestampMillis).coerceAtLeast(0L)
         val readingWall = System.currentTimeMillis() - ageMs
         return when (val id = serving.cellIdentity) {
@@ -220,6 +222,7 @@ class TelephonyCollector(
                     arfcn = earfcn, band = derived?.band ?: reported,
                     bandReported = reported, bandDerived = derived?.band,
                     bandAmbiguous = derived?.ambiguous == true, cellRat = Bands.LTE,
+                    connStatus = connStatus, primaryCells = primaries,
                     plmn = plmn, cellMillis = readingWall, servingReported = true
                 )
             }
@@ -233,13 +236,14 @@ class TelephonyCollector(
                     arfcn = nrarfcn, band = derived?.band ?: reported,
                     bandReported = reported, bandDerived = derived?.band,
                     bandAmbiguous = derived?.ambiguous == true, cellRat = Bands.NR,
+                    connStatus = connStatus, primaryCells = primaries,
                     plmn = plmn, cellMillis = readingWall, servingReported = true
                 )
             }
             // Registered on GSM/WCDMA or something newer than this code: we hold no identity for
             // it, and the LTE/NR identity from before is precisely the carried-forward cell the
             // writer must not store.
-            else -> base.copy(servingReported = false)
+            else -> base.copy(servingReported = false, connStatus = connStatus, primaryCells = primaries)
         }
     }
 
@@ -838,6 +842,7 @@ class TelephonyCollector(
                         neighbourCount = s?.neighbourCountSeen,
                         bandReported = id?.bandReported, bandDerived = id?.bandDerived,
                         cellRat = id?.cellRat,
+                        connStatus = id?.connStatus, primaryCells = id?.primaryCells,
                         cellAgeMs = cellAge,
                         ssRsrp = sig.ssRsrp, ssRsrq = sig.ssRsrq, ssSinr = sig.ssSinr,
                         nrPresent = sig.nrPresent,

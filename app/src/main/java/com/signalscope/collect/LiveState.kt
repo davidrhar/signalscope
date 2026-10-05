@@ -83,6 +83,9 @@ data class SimState(
      * which raster [arfcn] belong to. Not [rat], which is the display network type.
      */
     val cellRat: String? = null,
+    /** See RadioSample.connStatus. Diagnostic: is the primary-serving API usable on this chipset? */
+    val connStatus: Int? = null,
+    val primaryCells: Int? = null,
     /**
      * Whether the most recent cell-info report contained a registered LTE/NR cell. Null until the
      * first report. When false, [pci]/[ci]/[band] still hold the last known cell -- the dashboard

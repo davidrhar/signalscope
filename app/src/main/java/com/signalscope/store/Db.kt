@@ -44,6 +44,22 @@ data class RadioSample(
      */
     val cellRat: String? = null,
     /**
+     * What `CellInfo.getCellConnectionStatus()` said about the cell this row was attributed to,
+     * and how many cells in the same report claimed to be the primary.
+     *
+     * Recorded because a fix was shipped on an assumption and the assumption cannot be checked
+     * from the outside. Selecting the cell by CONNECTION_PRIMARY_SERVING changed the serving-cell
+     * alternation not at all -- 97 % of mast changes still bounce straight back, against 93 %
+     * before -- which is what it would look like if this chipset reports CONNECTION_UNKNOWN and
+     * the registered-cell fallback runs every time. That is a guess. These two columns turn it
+     * into a measurement: if [primaryCells] is always 0 the API is useless here and the serving
+     * cell has to be chosen some other way.
+     *
+     * 0 NONE, 1 PRIMARY_SERVING, 2 SECONDARY_SERVING, Int.MAX_VALUE UNKNOWN.
+     */
+    val connStatus: Int? = null,
+    val primaryCells: Int? = null,
+    /**
      * Age of the serving-cell identity at write time: wall-now minus the modem's own measurement
      * time. Null when no registered cell has ever been reported. A cached cell-info report is how a
      * twenty-minute-old identity used to pass as current; this makes that visible per row.
@@ -273,7 +289,7 @@ interface CollectorDao {
     entities = [RadioSample::class, RegistrationEvent::class, LinkEvent::class,
         ProbeResult::class, NeighbourCell::class, InstrumentEvent::class, BinAgg::class,
         SiteStat::class, BinHourStat::class],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class Db : RoomDatabase() {
@@ -447,6 +463,17 @@ abstract class Db : RoomDatabase() {
                 "PRIMARY KEY(`binId`, `hourBucket`))"
         )
 
+        internal val MIGRATION_8_9_SQL = listOf(
+            "ALTER TABLE `radio_sample` ADD COLUMN `connStatus` INTEGER",
+            "ALTER TABLE `radio_sample` ADD COLUMN `primaryCells` INTEGER"
+        )
+
+        private val MIGRATION_8_9 = object : androidx.room.migration.Migration(8, 9) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_8_9_SQL.forEach { db.execSQL(it) }
+            }
+        }
+
         private val MIGRATION_7_8 = object : androidx.room.migration.Migration(7, 8) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 MIGRATION_7_8_SQL.forEach { db.execSQL(it) }
@@ -462,7 +489,7 @@ abstract class Db : RoomDatabase() {
         @Volatile private var inst: Db? = null
         fun get(ctx: Context): Db = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx.applicationContext, Db::class.java, "signalscope.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                 .build().also { inst = it }
         }
     }
