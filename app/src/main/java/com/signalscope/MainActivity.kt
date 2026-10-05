@@ -61,7 +61,6 @@ private fun Root() {
     val net by LiveState.net.collectAsStateWithLifecycle()
     val counters by LiveState.counters.collectAsStateWithLifecycle()
     val running by LiveState.running.collectAsStateWithLifecycle()
-    val degraded by LiveState.degraded.collectAsStateWithLifecycle()
     val profile by LiveState.profile.collectAsStateWithLifecycle()
 
     var tab by remember { mutableStateOf(Tab.LIVE) }
@@ -123,18 +122,11 @@ private fun Root() {
             }
         )
 
-        degraded?.let { msg ->
-            Row(
-                Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(T.Warn.copy(alpha = 0.10f))
-                    .border(1.dp, T.Warn.copy(alpha = 0.30f), RoundedCornerShape(10.dp))
-                    .padding(10.dp)
-            ) {
-                Text(msg, color = T.Warn, fontSize = 11.sp)
-            }
-            Spacer(Modifier.height(6.dp))
-        }
+        // One strip, every tab, silent when there is nothing wrong. It absorbs the degraded
+        // banner that used to live here: four screens each had their own way of reporting that
+        // something was broken, and the week that produced this had all four of them being
+        // reassuring about different faults at the same time. See AppHealth.
+        HealthStrip()
 
         if (tab != Tab.LIVE) {
             Box(Modifier.weight(1f)) {
