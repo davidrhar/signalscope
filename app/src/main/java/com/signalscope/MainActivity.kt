@@ -211,21 +211,12 @@ private fun Root() {
             }
 
             val sp = profile?.sub(active?.subId ?: -1)
-            if (active != null) Hero(active, sp) else {
-                Spacer(Modifier.height(24.dp))
-                Text("Waiting for a subscription — grant phone and location permission.",
-                    color = T.Dim, fontSize = 13.sp)
-            }
-
-            SecHead("Default route", net.ifname ?: "—")
-            RouteCard(net)
 
             if (active != null) {
-                // Where you are now, then what this mast has done before: the live fact first,
-                // because it is the one the person is asking about while a call breaks up, and
-                // the numbers below are the evidence for it rather than the point.
-                AreaCard()
-                SiteCard(active)
+                // The answer, first, in words. Everything below it is the evidence for this and
+                // is folded away -- a stranger opening the app should not have to read RSRQ to
+                // find out whether it is them.
+                HereCard(active)
 
                 // What happened, which is history of the thing above it rather than a separate
                 // place to visit. It used to be a tab of its own, which asked somebody wondering
@@ -243,10 +234,13 @@ private fun Root() {
                 // Short title. SecHead lays the subtitle out on the same row, and
                 // "Show the detail" against "serving cell / registration / device" ran the two
                 // into each other with no gap on a 1080-wide screen.
-                SecHead("Detail", "serving cell · registration · device")
+                SecHead("Detail", "signal · route · cell · registration · device")
                 Btn(if (detailOpen) "Hide" else "Show", ghost = true) { detailOpen = !detailOpen }
                 if (detailOpen) {
                     Spacer(Modifier.height(10.dp))
+                    Hero(active, sp)
+                    SecHead("Default route", net.ifname ?: "—")
+                    RouteCard(net)
                     SecHead("Serving cell", "updated live")
                     CellCard(active)
                     SecHead("Registration", "sub ${active.subId}")
@@ -254,6 +248,14 @@ private fun Root() {
                     SecHead("This device", "discovered, not assumed")
                     DeviceCard(profile, sp)
                 }
+            }
+
+            if (active == null) {
+                Spacer(Modifier.height(24.dp))
+                Text(
+                    "Waiting for a subscription — grant phone and location permission.",
+                    color = T.Dim, fontSize = 13.sp
+                )
             }
 
             Spacer(Modifier.height(18.dp))
