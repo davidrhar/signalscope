@@ -79,12 +79,19 @@ object Contribution {
 
         for (b in bins) {
             val area = runCatching { MapHex.cellToParent(b.id, SHARE_RES) }.getOrNull() ?: continue
-            val plmn = b.plmn ?: continue
+            // Bin.plmn is non-nullable and falls back to "—", so the old `?: continue` was dead code
+        // and a bin whose readings carried no network published an em-dash as its network code.
+        val plmn = b.plmn.takeIf { it.isNotBlank() && it != "—" } ?: continue
             for ((rawBand, ms) in b.bandMs) {
                 val band = shareBandLabel(rawBand)
 
-                val rsrp = b.bandRsrpHist[band]
-                val sinr = b.bandSinrHist[band]
+                // Keyed by rawBand, NOT by the share label. shareBandLabel rewrites "band 40"
+                // to "?40", so looking the histograms up by it missed every band whose RAT was
+                // not reported -- which is the exact category this file argues at length for
+                // keeping rather than dropping, measured there at 3.3 % of observed time. "B40"
+                // and "n78" pass through unchanged, so the loss was invisible unless looked for.
+                val rsrp = b.bandRsrpHist[rawBand]
+                val sinr = b.bandSinrHist[rawBand]
                 // A bin persisted before per-band histograms existed has none. It is skipped
                 // rather than filled in from the bin's total: apportioning the whole bin's
                 // distribution across its bands is what produced identically-shaped bands in the

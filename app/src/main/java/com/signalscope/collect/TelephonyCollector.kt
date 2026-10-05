@@ -846,8 +846,18 @@ class TelephonyCollector(
                 // not exist on the technology it is most needed for. The rest of this file
                 // already pairs the two this way.
                 val sinr = sig.rssnr ?: sig.ssSinr
-                runCatching { AreaState.offer(ctx, nowWall, sinr) }
-                runCatching { com.signalscope.store.AreaHistory.offer(ctx, nowWall, sinr) }
+                // The DATA subscription only.
+                //
+                // write() runs once per subscription, and both of these keep a single global
+                // window, so a dual-SIM phone averaged its two radios into one verdict: a flawless
+                // data SIM and an idle roaming one produced "data may stall here" about a
+                // connection that was fine. It also halved the time to a verdict, because the
+                // sample floor is a count. The idle SIM is not carrying the data the verdict is
+                // about, so it is not evidence about it.
+                if (LiveState.sims.value[subId]?.isDataSub == true) {
+                    runCatching { AreaState.offer(ctx, nowWall, sinr) }
+                    runCatching { com.signalscope.store.AreaHistory.offer(ctx, nowWall, sinr) }
+                }
 
                 dao.insertRadio(
                     RadioSample(

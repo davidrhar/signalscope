@@ -40,6 +40,46 @@ MIN_CONTRIBUTORS = 3
 MIN_SAMPLES = 30
 
 
+MAX_COUNT = 10**9
+MAX_SAMPLES_PER_RECORD = 5 * 10**6
+
+
+def _count(v):
+    try:
+        n = float(v)
+    except (TypeError, ValueError):
+        return 0
+    if n != n or n in (float("inf"), float("-inf")) or n < 0:
+        return 0
+    return min(int(n), MAX_COUNT)
+
+
+def _sane_key(v, limit):
+    return isinstance(v, str) and 0 < len(v) <= limit and "|" not in v
+
+
+def _sane(rec):
+    if not isinstance(rec, dict):
+        return False
+    if not _sane_key(rec.get("area"), 24):
+        return False
+    if not _sane_key(rec.get("network"), 16):
+        return False
+    if not _sane_key(rec.get("band"), 16):
+        return False
+    samples = _count(rec.get("samples"))
+    if samples > MAX_SAMPLES_PER_RECORD:
+        return False
+    for h in (rec.get("rsrp"), rec.get("sinr")):
+        if h is None:
+            continue
+        if not isinstance(h, dict) or len(h) > 512:
+            return False
+        if sum(_count(w) for w in h.values()) > max(samples * 2, 64):
+            return False
+    return True
+
+
 def merge_hist(into, src):
     for value, weight in src.items():
         into[int(value)] = into.get(int(value), 0) + int(weight)
@@ -89,7 +129,11 @@ def main(argv):
             # parser before it was ever stored -- it names a hexagon hundreds of kilometres from
             # where it was measured and cannot be repaired. Dropped, exactly as aggregate.js
             # drops it, because two implementations of one rule are only safe while they agree.
-            if not isinstance(rec.get("area"), str):
+            # Same rule as aggregate.js, for the same reason: every field here was chosen by
+            # whoever sent the bundle, and two implementations of one rule are only safe while
+            # they agree. A '|' in a key field would be republished as a different cell; an
+            # unbounded or negative count would own the percentiles or erase the area.
+            if not _sane(rec):
                 continue
             key = (rec["area"], rec["network"], rec["band"])
             cell = cells[key]

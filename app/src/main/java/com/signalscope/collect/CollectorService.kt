@@ -15,6 +15,7 @@ import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
@@ -71,7 +72,20 @@ class CollectorService : LifecycleService() {
         // 30 days; nothing enforced it, so the movement history the two databases jointly hold
         // grew for the life of the install. Cheap (one indexed DELETE per table) and it runs
         // before the collectors add to them.
-        io.launch { runCatching { com.signalscope.store.Retention.sweep(this@CollectorService) } }
+        io.launch {
+            runCatching { com.signalscope.store.Retention.sweep(this@CollectorService) }
+            // Retention.sweep covers radio_sample, the roll-ups and neighbour_cell. It has never
+            // touched bin_agg, bin_hour or site_stat, and the sweep that does was written and
+            // never called -- so three tables holding 66 m position bins with cell identity, a
+            // place-by-hour profile, and every mast ever served grew without bound for the life
+            // of the install. Both of those tables' own doc comments promise the opposite.
+            runCatching {
+                com.signalscope.store.BinAggregator.sweep(
+                    this@CollectorService,
+                    com.signalscope.store.Retention.RAW_MAX_AGE_MS
+                )
+            }
+        }
 
         // A collector that cannot start must not take the service down with it. Either one can
         // throw on a handset that lacks the subsystem (no telephony at all on a Wi-Fi tablet),
@@ -382,6 +396,13 @@ class CollectorService : LifecycleService() {
         runCatching { ActionTraffic.stop() }
         // Releases only the service's claim; the Map tab's, if it holds one, survives.
         runCatching { MapLocationCollector.stopForService() }
+        // Cancel the scope, not only the collectors it started. Three `while (isActive)` loops
+        // live on it, and without this they survive the service: the 15-second policy loop
+        // re-asserted the location request moments after stopForService() above released it, so
+        // GNSS stayed on for the life of the process with the app reporting that it had stopped.
+        // The probe loop kept spending the user's data, and the notification loop kept re-posting
+        // for a destroyed service. Stopping and starting stacked a second set on a new scope.
+        runCatching { io.cancel() }
         telephony = null
         connectivity = null
         LiveState.running.value = false

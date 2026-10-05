@@ -82,13 +82,25 @@ async function rebuild() {
     for (const p of paths) {
       const s = await stat(p).catch(() => null);
       if (s && s.mtimeMs < cutoff) { stale.push(p); continue; }
-      try { bundles.push(JSON.parse(await readFile(p, 'utf8'))); }
-      catch { /* a corrupt bundle is skipped, never fatal */ }
+      try {
+        const doc = JSON.parse(await readFile(p, 'utf8'));
+        // Shape-checked here as well as inside aggregate(). One stored file that aggregate
+        // cannot survive would throw before the map is written AND before the expiry below --
+        // taking the public document down permanently and silently cancelling the 30-day
+        // deletion this service promises. Expiry must not live behind somebody else's input.
+        if (doc && typeof doc === 'object' && Array.isArray(doc.records)) bundles.push(doc);
+      } catch { /* a corrupt bundle is skipped, never fatal */ }
     }
 
-    const map = sharedMap(bundles);
-    await writeFile(MAP, JSON.stringify(map));
-    for (const p of stale) await rm(p, { force: true });
+    // Expiry runs whether or not the aggregate succeeds. It is a retention promise to every
+    // contributor and must not be contingent on the current set of bundles being well formed.
+    let map;
+    try {
+      map = sharedMap(bundles);
+      await writeFile(MAP, JSON.stringify(map));
+    } finally {
+      for (const p of stale) await rm(p, { force: true });
+    }
     return map;
   })().finally(() => { rebuilding = null; });
   return rebuilding;
@@ -195,7 +207,9 @@ createServer(async (req, res) => {
 
     return send(res, 404, { error: 'not found' });
   } catch (e) {
-    return send(res, 500, { error: String(e?.message || e) });
+    // Not the exception text. It told an attacker their malformed input had landed, and said
+    // something about the code's internals to everyone else.
+    return send(res, 500, { error: 'internal error' });
   }
 }).listen(PORT, '0.0.0.0', () => {
   console.log(`signalscope shared map on :${PORT}, data in ${DATA}`);

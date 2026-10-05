@@ -95,6 +95,10 @@ object BinAggregator {
     suspend fun sweep(ctx: Context, maxAgeMs: Long): Int = runCatching {
         val cutoffDay = ((System.currentTimeMillis() - maxAgeMs) / DAY_MS).toInt()
         runCatching { AreaHistory.sweep(ctx, maxAgeMs) }
+        // The mast record ages out on the same line as everything else. It outlives the raw rows
+        // it was folded from by design, but "outlives the rows" was never meant to be "forever":
+        // site_stat holds every LTE mast this phone has ever been served by, against hour of day.
+        runCatching { Db.get(ctx).dao().sweepSiteStats(cutoffDay) }
         Db.get(ctx).dao().sweepBinAgg(cutoffDay)
     }.getOrDefault(0)
 }

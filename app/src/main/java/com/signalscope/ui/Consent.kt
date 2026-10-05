@@ -59,7 +59,8 @@ import androidx.compose.ui.text.font.FontFamily
  * ## What it does not claim
  *
  * Position is no longer stored -- `map_fix` is gone and fixes live in memory only -- so this screen
- * does not describe a location history, because there is not one. What it does still say is that
+ * does not describe a location history, because there is not one -- which stopped being true
+ * when bin_agg and bin_hour were added, and the screen now says so instead. What it does still say is that
  * serving-cell identity is recorded against time, arrives with no location permission at all, and
  * is a record of movement in its own right. That is the sentence a reader is least likely to
  * already know and most likely to want.
@@ -131,8 +132,21 @@ fun ConsentScreen(onAccept: () -> Unit, onDecline: () -> Unit) {
         Body("It records which mast served you at each moment \u2014 a record of your movements at " +
             "the scale of a neighbourhood. That happens whether or not you grant location " +
             "permission, because Android reports the mast to any app with phone permission.")
-        Body("Your position is never stored. Nothing is uploaded anywhere. Detailed records are " +
-            "deleted after 30 days.")
+        // All three clauses here were wrong, which a red-team pass established line by line.
+        // "Your position is never stored" was true of coordinates and false of the 66 m bins and
+        // the place-by-hour table. "Nothing is uploaded anywhere" was contradicted by the sharing
+        // feature, the map-tile fetches and the speed test. "Detailed records are deleted after
+        // 30 days" described a compaction, not a deletion. This is the screen a reviewer and a
+        // court read as the consent; it has to be the most accurate text in the app rather than
+        // the most reassuring.
+        Body("No coordinate is ever stored. What is kept is a coarse area — about 460 m across " +
+            "for anything shared, finer on this phone only — and which mast served you, against " +
+            "the hour of the day.")
+        Body("Nothing leaves this phone unless you switch sharing on, which is off by default. " +
+            "The app does fetch map tiles, and runs a small speed test, both over the internet.")
+        Body("Detailed records are compacted after 30 days: cell identity and timing advance are " +
+            "removed, and what remains is a summary rather than the original readings. You can " +
+            "export everything, or delete all of it, at any time.")
         Body("Collecting costs somewhere between about 3% and 10% of a full battery a day — " +
             "nearer the low end on a phone that stays put, nearer the high end while travelling " +
             "on poor signal, which is when it has the most to measure — and up to about 1 MB of " +

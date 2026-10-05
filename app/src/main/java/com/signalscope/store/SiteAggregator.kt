@@ -202,7 +202,11 @@ object SiteAggregator {
     }.getOrDefault(Status(0, 0, 0L, 0L))
 
     /** Forget every mast's record, and start the fold again from nothing. */
-    fun forget(ctx: Context) {
+    suspend fun forget(ctx: Context) {
+        // Both halves, or neither works. Removing the watermark alone re-reads the whole backlog
+        // and merges it into rows that were never deleted, doubling every mast's totals -- and
+        // stamping KEY_VER suppressed the version check that would otherwise have caught it.
+        runCatching { Db.get(ctx).openHelper.writableDatabase.execSQL("DELETE FROM `site_stat`") }
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .remove(KEY_MARK).putInt(KEY_VER, FOLD_VERSION).apply()
     }

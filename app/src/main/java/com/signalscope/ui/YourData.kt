@@ -21,6 +21,7 @@ import com.signalscope.store.Db
 import com.signalscope.store.Export
 import com.signalscope.store.Networks
 import com.signalscope.store.SiteAggregator
+import com.signalscope.store.ShareConsent
 import com.signalscope.store.Submission
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -153,6 +154,10 @@ private suspend fun wipe(ctx: Context) {
     // is exactly the kind of thing someone pressing this button means to be rid of.
     runCatching { Networks.forgetLearned(ctx) }
     runCatching { Submission.forget(ctx) }
+    // Sharing is a decision, and "delete everything collected" unmakes the decisions too. It was
+    // left on, so re-accepting the consent screen afterwards silently resumed uploads from what
+    // the person had just told the app was a clean slate.
+    runCatching { ShareConsent.setEnabled(ctx, false) }
     // Preference files from features that no longer exist. Nothing reads them, which is exactly
     // why they survived every wipe: a file nobody references is a file nobody remembers to empty,
     // and "delete everything collected" has to mean everything.

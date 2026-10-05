@@ -91,7 +91,17 @@ object Submission {
     /** Part of "delete everything collected": the next upload is from a phone the server has
      *  never seen, which is what a fresh install means. */
     fun forget(ctx: Context) {
-        ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().clear().apply()
+        // The id goes; the pending retirement stays, and if there was none, the current id
+        // becomes one. clear() dropped both -- so the bundle already filed under that id sat on
+        // the server until retention expired it, still counted toward every published cell, and
+        // the next upload under a fresh id made the same phone a SECOND contributor. That is the
+        // double count this whole mechanism exists to prevent, reintroduced by the delete path,
+        // and it contradicts the privacy page in as many words: "after which your phone is one
+        // we have never seen."
+        val p = ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val retire = p.getString(KEY_RETIRE, null) ?: p.getString(KEY_ID, null)
+        p.edit().clear().apply()
+        if (retire != null) p.edit().putString(KEY_RETIRE, retire).apply()
     }
 
     private fun mint(): String {

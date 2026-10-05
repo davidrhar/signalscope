@@ -141,3 +141,51 @@ test('a real MapHex id survives the round trip intact', () => {
   assert.equal(cells.length, 1);
   assert.equal(cells[0].area, id, 'every digit, or the hexagon moves');
 });
+
+/*
+ * Hostile input. There was none of this before, and a red-team pass found four separate ways in
+ * about as many minutes -- one of which took the public map down permanently with a single
+ * unauthenticated POST, and with it the 30-day deletion promise, because expiry ran only after a
+ * successful aggregate.
+ *
+ * /contribute has no authentication by design: a contribution carries no account precisely so it
+ * cannot be tied to one. That makes every field below attacker-chosen, and makes these tests the
+ * only thing standing between the public document and whoever wants to edit it.
+ */
+const hostile = (records) => ({
+  format: 'signalscope-contribution', version: 2,
+  generated: '2026-10-05', shareRes: 8, records,
+});
+const honest = () => [1, 2, 3].map(() => bundle([rec(111, '525-10', '40', 50)]));
+
+test('a null record does not take the whole map down', () => {
+  // One request did this to the live service: aggregate threw, so the map was never written and
+  // -- far worse -- expiry never ran again for anybody.
+  assert.doesNotThrow(() => aggregate([hostile([null]), hostile([undefined]), hostile(['x'])]));
+  assert.equal(aggregate([hostile([null])]).cells.length, 0);
+});
+
+test('a negative sample count cannot erase an area from the map', () => {
+  const before = aggregate(honest()).cells.length;
+  const after = aggregate([...honest(), hostile([{ ...rec(111, '525-10', '40', 50), samples: -1e9 }])]);
+  assert.equal(before, 1);
+  assert.equal(after.cells.length, 1, 'one bundle must not withhold an area that qualified');
+});
+
+test('one bundle cannot own the published percentiles', () => {
+  // The claim being defended is "medians rather than means, so a single spammer moves a
+  // published cell very little". That is only true while the adversary does not write the
+  // weights -- these are weighted quantiles over a client-supplied histogram.
+  const bomb = hostile([{ ...rec(111, '525-10', '40', 50), rsrp: { '-140': 1e18 } }]);
+  const out = aggregate([...honest(), bomb, bomb]);
+  assert.equal(out.cells[0].rsrpP50, -100, 'the honest readings still decide the median');
+});
+
+test('a separator in a key field cannot forge a different cell', () => {
+  // Cells are keyed `area|network|band` and split back apart, so a network containing '|'
+  // would be republished with somebody else's area and band.
+  const forged = hostile([{ ...rec(111, '525-10', '40', 50), network: 'XX|YY' }]);
+  const out = aggregate([...honest(), forged, forged, forged]);
+  assert.equal(out.cells.length, 1);
+  assert.equal(out.cells[0].network, '525-10');
+});
