@@ -177,7 +177,7 @@ private fun Root() {
         // History, opened from Now. Full height while it is open, because it is a list and a
         // list inside a scrolling column is both illegal in Compose and unreadable in practice.
         if (historyOpen) {
-            Box(Modifier.weight(1f)) { TimelineScreen() }
+            Box(Modifier.weight(1f)) { TimelineScreen(onBack = { historyOpen = false }) }
             BottomNav(tab) { historyOpen = false; mapOpensShare = false; tab = it }
             return@Column
         }

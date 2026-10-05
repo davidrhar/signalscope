@@ -134,7 +134,7 @@ fun rememberIncidents(): IncidentEngine.Result? {
 }
 
 @Composable
-fun TimelineScreen(modifier: Modifier = Modifier) {
+fun TimelineScreen(modifier: Modifier = Modifier, onBack: (() -> Unit)? = null) {
     val sims by LiveState.sims.collectAsStateWithLifecycle()
 
     val result = rememberIncidents()
@@ -156,6 +156,21 @@ fun TimelineScreen(modifier: Modifier = Modifier) {
     BackHandler(enabled = current != null) { open = null }
 
     Column(modifier.fillMaxSize()) {
+        // A visible way out.
+        //
+        // The system back gesture already closed this, and nothing on screen said so -- which is
+        // the same fault as a My location button that renders only when it would work: the
+        // affordance exists and is invisible, so the person concludes it is not there. Shown only
+        // when this screen was opened from somewhere that can be returned to.
+        if (onBack != null && current == null) {
+            Text(
+                "\u2190  Back to Now",
+                color = T.Brand, fontSize = 13.sp,
+                modifier = Modifier
+                    .padding(start = 16.dp, top = 10.dp, bottom = 2.dp)
+                    .clickableNoRipple { onBack() }
+            )
+        }
         if (current != null) {
             Detail(current) { open = null }
             return@Column
