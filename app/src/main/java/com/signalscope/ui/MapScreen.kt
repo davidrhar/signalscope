@@ -1027,6 +1027,10 @@ private fun LayerPanel(m: MapModel, layer: MapLayer, crowdOn: Boolean, crowd: Sh
     // What everyone else's data amounts to, said where someone is already asking what they are
     // looking at. This lived in EmptyState, which renders only when the map has no bins of your
     // own -- so the one question it answered was answered only when nobody would ask it.
+    // Padded to match the rest of this panel. Everything else here is inside an AccentCard,
+    // which brings its own insets, so a bare SecHead and Text ran edge to edge against the
+    // screen while the cards above and below them did not.
+    Column(Modifier.padding(horizontal = 10.dp)) {
     SecHead("Shared map", "from other phones")
     Text(
         when {
@@ -1040,6 +1044,7 @@ private fun LayerPanel(m: MapModel, layer: MapLayer, crowdOn: Boolean, crowd: Sh
         },
         color = T.Dim, fontSize = 12.sp, lineHeight = 16.sp
     )
+    }
     Spacer(Modifier.height(10.dp))
 
     when (layer) {
