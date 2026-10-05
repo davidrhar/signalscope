@@ -46,6 +46,8 @@ object SiteHistory {
 
     data class Verdict(
         val site: Long,
+        /** The band this verdict is about. A mast under aggregation is two of these. */
+        val band: Int?,
         val samples: Int,
         /** Share of readings below 0 dB SINR in this window. */
         val badFraction: Double,
@@ -64,18 +66,21 @@ object SiteHistory {
      *   new phone and must read as silence rather than as reassurance.
      */
     suspend fun forCell(
-        ctx: Context, ci: Long?, rat: String?, plmn: String?
+        ctx: Context, ci: Long?, rat: String?, plmn: String?, band: Int?
     ): Verdict? = withContext(Dispatchers.IO) {
         if (ci == null || rat == null || !rat.startsWith("LTE")) return@withContext null
         if (ci !in 0..0x0FFFFFFFL) return@withContext null
         if (plmn.isNullOrBlank() || plmn == "—") return@withContext null
         val site = ci shr 8
+        // The band is part of the mast's identity here. Without it this answered about an average
+        // over two carriers, which described neither -- see SiteStat.band.
+        val b = band ?: -1
 
         runCatching {
             // Read the standing record, not the raw rows. The record outlives the 30-day sweep, so
             // a mast the phone has known for months keeps its history instead of silently
             // forgetting everything older than retention.
-            val rows = Db.get(ctx).dao().siteStats(plmn, site)
+            val rows = Db.get(ctx).dao().siteStats(plmn, site, b)
             if (rows.isEmpty()) return@runCatching null
 
             val nowH = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
@@ -91,6 +96,7 @@ object SiteHistory {
             val (betterPart, betterFrac) = bestPart(rows)
             Verdict(
                 site = site,
+                band = b.takeIf { it > 0 },
                 samples = n.toInt(),
                 badFraction = bad.toDouble() / n,
                 medianRsrq = median(hist),

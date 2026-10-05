@@ -37,7 +37,7 @@ import com.signalscope.store.SiteHistory
 @Composable
 fun SiteCard(s: SimState) {
     val ctx = LocalContext.current
-    var verdict by remember(s.ci, s.plmn) { mutableStateOf<SiteHistory.Verdict?>(null) }
+    var verdict by remember(s.ci, s.plmn, s.band) { mutableStateOf<SiteHistory.Verdict?>(null) }
 
     // Recomputed when the serving cell changes, not on every frame: it is a scan of up to a
     // month of rows and the answer cannot change while the phone stays on one cell.
@@ -45,8 +45,8 @@ fun SiteCard(s: SimState) {
     // reads IWLAN while Wi-Fi calling is up, which would have made this card go quiet in exactly
     // the condition where the cellular leg is worth warning about.
     val rat = s.cellRat ?: s.rat
-    LaunchedEffect(s.ci, rat, s.plmn) {
-        verdict = SiteHistory.forCell(ctx, s.ci, rat, s.plmn)
+    LaunchedEffect(s.ci, rat, s.plmn, s.band) {
+        verdict = SiteHistory.forCell(ctx, s.ci, rat, s.plmn, s.band)
     }
 
     val v = verdict ?: return
@@ -61,7 +61,8 @@ fun SiteCard(s: SimState) {
         Spacer(Modifier.height(7.dp))
         Text(
             "Around this time of day, ${pct(v.badFraction)} of the readings this phone has taken " +
-                "on mast ${v.site} were below the level where calls and video stop working — " +
+                "on mast ${v.site}${v.band?.let { " band $it" } ?: ""} were below the level where " +
+                "calls and video stop working — " +
                 "${v.samples} readings over the last month." +
                 (v.medianRsrq?.let {
                     " Signal quality here runs about $it dB, where an uncontended cell reads −3."

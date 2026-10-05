@@ -46,15 +46,17 @@ object SiteAggregator {
      *    carrying data. Version 1 read `rat` and so discarded every reading taken while Wi-Fi
      *    calling was up, each of which had a perfectly usable LTE cell id on it.
      *
-     * 3: starts again from the moment of the upgrade rather than from the oldest stored row,
-     *    which no other version has had to do. Rows written before the carrier-aggregation fix
-     *    in TelephonyCollector.applyServing carry a serving cell that is the primary on some
-     *    readings and the secondary on others, so a mast's record built from them is a blend of
-     *    two masts on two bands. That cannot be repaired by re-reading: the rows do not say which
-     *    reading was which. Discarding the record and waiting for correct rows is the only honest
-     *    answer, and it costs a few days of silence from the mast card.
+     * 3: started again from the moment of the upgrade rather than from the oldest stored row,
+     *    on the belief that rows written before the carrier-aggregation fix were unrepairable.
+     *    They were not, and the fix did nothing -- see version 4.
+     *
+     * 4: keys on the band as well as the mast, which is the actual answer to what 3 was trying
+     *    to work around. The readings were never mixed up: each one carries its own band and its
+     *    own signal, and they agree. What was wrong was folding two carriers into one mast. The
+     *    backlog is read again rather than skipped, because every stored reading has carried its
+     *    band all along, so the whole history can be rebuilt correctly instead of starting empty.
      */
-    private const val FOLD_VERSION = 3
+    private const val FOLD_VERSION = 4
 
     /** Versions whose upgrade must skip the stored backlog instead of re-reading it. */
     private val SKIP_BACKLOG = setOf(3)
@@ -98,13 +100,15 @@ object SiteAggregator {
         val mark = prefs.getLong(KEY_MARK, 0L)
         val db = Db.get(ctx).openHelper.readableDatabase
 
-        // (plmn, site, hour) -> running totals for this pass.
-        val acc = HashMap<Triple<String, Long, Int>, Acc>()
+        // (plmn, site, band, hour) -> running totals for this pass. The band is in the key
+        // because a carrier-aggregated connection is two masts and averaging them describes
+        // neither; see the note on SiteStat.band.
+        val acc = HashMap<Key, Acc>()
         var maxWall = mark
         var read = 0
 
         db.query(
-            "SELECT wallMillis, servingCi, rssnr, rsrq, mcc, mnc, rat, cellRat FROM radio_sample " +
+            "SELECT wallMillis, servingCi, rssnr, rsrq, mcc, mnc, rat, cellRat, bandNum FROM radio_sample " +
                 "WHERE wallMillis > $mark ORDER BY wallMillis ASC LIMIT $BATCH"
         ).use { c ->
             val cal = java.util.Calendar.getInstance()
@@ -133,7 +137,8 @@ object SiteAggregator {
                 if (mcc.isEmpty()) continue
 
                 cal.timeInMillis = wall
-                val key = Triple("$mcc-$mnc", ci shr 8, cal.get(java.util.Calendar.HOUR_OF_DAY))
+                val band = if (c.isNull(8)) -1 else c.getInt(8)
+                val key = Key("$mcc-$mnc", ci shr 8, band, cal.get(java.util.Calendar.HOUR_OF_DAY))
                 val a = acc.getOrPut(key) { Acc() }
                 a.samples++
                 if (c.getInt(2) < 0) a.belowZero++
@@ -153,13 +158,13 @@ object SiteAggregator {
         // Merge with what is already stored, one mast at a time.
         val merged = ArrayList<SiteStat>(acc.size)
         for ((key, a) in acc) {
-            val (plmn, site, hour) = key
-            val prior = dao.siteStats(plmn, site).firstOrNull { it.hourBucket == hour }
+            val (plmn, site, band, hour) = key
+            val prior = dao.siteStats(plmn, site, band).firstOrNull { it.hourBucket == hour }
             val hist = HashMap<Int, Long>()
             prior?.let { decodeHist(it.rsrqHist, hist) }
             a.rsrq.forEach { (v, n) -> hist[v] = (hist[v] ?: 0L) + n }
             merged += SiteStat(
-                plmn = plmn, site = site, hourBucket = hour,
+                plmn = plmn, site = site, band = band, hourBucket = hour,
                 samples = (prior?.samples ?: 0L) + a.samples,
                 belowZero = (prior?.belowZero ?: 0L) + a.belowZero,
                 rsrqHist = encodeHist(hist),
@@ -201,6 +206,8 @@ object SiteAggregator {
         ctx.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
             .remove(KEY_MARK).putInt(KEY_VER, FOLD_VERSION).apply()
     }
+
+    private data class Key(val plmn: String, val site: Long, val band: Int, val hour: Int)
 
     private class Acc {
         var samples = 0L

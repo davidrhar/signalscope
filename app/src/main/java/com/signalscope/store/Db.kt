@@ -263,8 +263,8 @@ interface CollectorDao {
     @Query("SELECT COUNT(*) FROM bin_agg") suspend fun binAggCount(): Int
 
     // ---- accumulated per-mast experience ---------------------------------------------------
-    @Query("SELECT * FROM site_stat WHERE plmn = :plmn AND site = :site")
-    suspend fun siteStats(plmn: String, site: Long): List<SiteStat>
+    @Query("SELECT * FROM site_stat WHERE plmn = :plmn AND site = :site AND band = :band")
+    suspend fun siteStats(plmn: String, site: Long, band: Int): List<SiteStat>
 
     @Query("SELECT * FROM site_stat") suspend fun allSiteStats(): List<SiteStat>
 
@@ -313,7 +313,7 @@ interface CollectorDao {
     entities = [RadioSample::class, RegistrationEvent::class, LinkEvent::class,
         ProbeResult::class, NeighbourCell::class, InstrumentEvent::class, BinAgg::class,
         SiteStat::class, BinHourStat::class],
-    version = 11,
+    version = 12,
     exportSchema = false
 )
 abstract class Db : RoomDatabase() {
@@ -502,6 +502,30 @@ abstract class Db : RoomDatabase() {
             "ALTER TABLE `radio_sample` ADD COLUMN `regChannels` INTEGER"
         )
 
+        /**
+         * The mast record gains the band in its key.
+         *
+         * A primary key cannot be altered in SQLite, and there is nothing to preserve: every row
+         * is an average over two carriers that should never have been averaged. The table goes
+         * and SiteAggregator rebuilds it from the stored readings, which have carried the band on
+         * every row all along.
+         */
+        internal val MIGRATION_11_12_SQL = listOf(
+            "DROP TABLE IF EXISTS `site_stat`",
+            "CREATE TABLE IF NOT EXISTS `site_stat` (" +
+                "`plmn` TEXT NOT NULL, `site` INTEGER NOT NULL, `band` INTEGER NOT NULL, " +
+                "`hourBucket` INTEGER NOT NULL, `samples` INTEGER NOT NULL, " +
+                "`belowZero` INTEGER NOT NULL, `rsrqHist` TEXT NOT NULL, " +
+                "`lastSeenDay` INTEGER NOT NULL, " +
+                "PRIMARY KEY(`plmn`, `site`, `band`, `hourBucket`))"
+        )
+
+        private val MIGRATION_11_12 = object : androidx.room.migration.Migration(11, 12) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_11_12_SQL.forEach { db.execSQL(it) }
+            }
+        }
+
         private val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 MIGRATION_10_11_SQL.forEach { db.execSQL(it) }
@@ -535,7 +559,7 @@ abstract class Db : RoomDatabase() {
         @Volatile private var inst: Db? = null
         fun get(ctx: Context): Db = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx.applicationContext, Db::class.java, "signalscope.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
                 .build().also { inst = it }
         }
     }
