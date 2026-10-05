@@ -113,6 +113,10 @@ fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
     var tilesRendered by remember { mutableStateOf<Boolean?>(null) }
     var styleError by remember { mutableStateOf<String?>(null) }
     var regionsOpen by remember { mutableStateOf(false) }
+    /** Which of the three grouped pickers is open. At most one at a time. */
+    var layerMenu by remember { mutableStateOf(false) }
+    var networkMenu by remember { mutableStateOf(false) }
+    var viewMenu by remember { mutableStateOf(false) }
     /**
      * Detail panels start CLOSED, because the map is the thing the screen is for.
      *
@@ -322,52 +326,83 @@ fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
 
         // ---------------------------------------------------------------- top chrome
         Column(Modifier.align(Alignment.TopStart).fillMaxWidth()) {
+            /*
+             * Three chips that fit, instead of two rows that scroll.
+             *
+             * There were eight layer chips and up to a dozen network chips in two horizontally
+             * scrolling rows, and the evidence against that is concrete: "Shared map" sat past
+             * the right edge of a 1080-wide screen, so other people's measurements went unnoticed
+             * for two days until the server was queried directly. A control that has to be
+             * scrolled into view is a control most people will never find.
+             *
+             * Grouped by what the person is actually deciding: what the colours mean, which
+             * network, and what else is drawn. Each opens in place, one at a time, and closing
+             * is the same tap that opened it.
+             */
             Row(
-                Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                MapLayer.entries.forEach { l ->
-                    Chip(l.label, layer == l) { layer = l }
+                Chip("${layer.label} \u25BE", layerMenu) {
+                    layerMenu = !layerMenu; networkMenu = false; viewMenu = false
                 }
-                Chip(if (basemap) "Basemap" else "No basemap", !basemap) { basemap = !basemap }
-                Chip(regionChipLabel(regions), regionsOpen) { regionsOpen = !regionsOpen }
-                Chip(
+                if (networks.size > 1) {
+                    Chip(
+                        (onlyNetwork?.let { Networks.name(it) } ?: "All networks") + " \u25BE",
+                        networkMenu
+                    ) { networkMenu = !networkMenu; layerMenu = false; viewMenu = false }
+                }
+                Chip("View \u25BE", viewMenu) {
+                    viewMenu = !viewMenu; layerMenu = false; networkMenu = false
+                }
+            }
+
+            // What the colours mean. One of five, so a list rather than toggles.
+            if (layerMenu) Menu {
+                MapLayer.entries.forEach { l ->
+                    MenuRow(l.label, layer == l) { layer = l; layerMenu = false }
+                }
+            }
+
+            if (networkMenu) Menu {
+                MenuRow("All networks", onlyNetwork == null) { onlyNetwork = null; networkMenu = false }
+                nearby.forEach { pn ->
+                    MenuRow(Networks.name(pn), onlyNetwork == pn) {
+                        onlyNetwork = pn; networkMenu = false
+                    }
+                }
+                if (elsewhere.isNotEmpty()) {
+                    // Still folded, still for the same reason: a phone that has travelled
+                    // accumulates networks from countries it left months ago.
+                    MenuRow("Elsewhere \u00b7 ${elsewhere.size}", elsewhereOpen) {
+                        elsewhereOpen = !elsewhereOpen
+                        if (!elsewhereOpen && onlyNetwork in elsewhere) onlyNetwork = null
+                    }
+                    if (elsewhereOpen) elsewhere.forEach { pn ->
+                        MenuRow("    " + Networks.name(pn), onlyNetwork == pn) {
+                            onlyNetwork = pn; networkMenu = false
+                        }
+                    }
+                }
+            }
+
+            // Everything else that is drawn or not drawn. Toggles, so they stay open: somebody
+            // turning the basemap off usually wants to change the resolution too.
+            if (viewMenu) Menu {
+                MenuRow(
                     when {
-                        crowdBusy -> "Shared…"
-                        crowdOn -> "Shared · ${crowd?.cells?.size ?: 0}"
+                        crowdBusy -> "Shared map \u00b7 loading"
+                        crowdOn -> "Shared map \u00b7 ${crowd?.cells?.size ?: 0} areas"
                         else -> "Shared map"
                     },
                     crowdOn
                 ) { crowdOn = !crowdOn; SharedMap.setLayerOn(ctx, crowdOn) }
-            }
-            if (networks.size > 1) {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Chip("All networks", onlyNetwork == null) { onlyNetwork = null }
-                    nearby.forEach { p ->
-                        Chip(Networks.name(p), onlyNetwork == p) {
-                            onlyNetwork = if (onlyNetwork == p) null else p
-                        }
-                    }
-                    if (elsewhere.isNotEmpty()) {
-                        Chip("Elsewhere · ${elsewhere.size}", elsewhereOpen) {
-                            elsewhereOpen = !elsewhereOpen
-                            // Folding away the network being filtered on would leave the map
-                            // showing one network with no chip saying which.
-                            if (!elsewhereOpen && onlyNetwork in elsewhere) onlyNetwork = null
-                        }
-                        if (elsewhereOpen) elsewhere.forEach { p ->
-                            Chip(Networks.name(p), onlyNetwork == p) {
-                                onlyNetwork = if (onlyNetwork == p) null else p
-                            }
-                        }
-                    }
+                MenuRow("Basemap", basemap) { basemap = !basemap }
+                MenuRow(regionChipLabel(regions), regionsOpen) {
+                    regionsOpen = !regionsOpen; viewMenu = false
                 }
             }
+
             if (m != null) {
                 StatusStrip(m, fix, tilesRendered, styleError, regions, detailOpen) {
                     detailOpen = !detailOpen
@@ -1890,5 +1925,44 @@ private fun SharePanel(onClose: () -> Unit) {
         ) {
             ContributePanel()
         }
+    }
+}
+
+/**
+ * A grouped picker, opened in place by the chip above it.
+ *
+ * Deliberately not a dropdown overlay: the map is behind it and a floating menu over a map reads
+ * as part of the map. It sits in the flow, pushes the map down while it is open, and closes with
+ * the same tap that opened it.
+ */
+@Composable
+private fun Menu(content: @Composable ColumnScope.() -> Unit) {
+    Column(
+        Modifier.padding(horizontal = 10.dp)
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(14.dp))
+            .background(T.Surface2.copy(alpha = 0.97f))
+            .border(1.dp, T.Line, RoundedCornerShape(14.dp))
+            .padding(vertical = 4.dp),
+        content = content
+    )
+}
+
+@Composable
+private fun MenuRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier.fillMaxWidth().clickableNoRipple(onClick).padding(horizontal = 14.dp, vertical = 11.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            label,
+            color = if (selected) T.Brand else T.Text,
+            fontSize = 13.5.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            modifier = Modifier.weight(1f)
+        )
+        // A tick rather than a highlight: several of these are independent toggles, and a
+        // highlighted row reads as "this one is selected" rather than "this one is on".
+        if (selected) Text("\u2713", color = T.Brand, fontSize = 14.sp)
     }
 }
