@@ -162,6 +162,7 @@ private suspend fun wipe(ctx: Context) {
     }
     runCatching { ctx.filesDir.resolve("rollup").deleteRecursively() }
     runCatching { ctx.filesDir.resolve("export").deleteRecursively() }
+    runCatching { FirstRun.forget(ctx) }
     Consent.revoke(ctx)
 }
 

@@ -115,6 +115,15 @@ private fun Root() {
         )
     }
 
+    // After consent and the permission prompts, before anything dense. Almost every screen in
+    // this app is silent until it has evidence, and each of those silences is indistinguishable
+    // from the app being broken unless somebody said it was coming. See FirstRun.
+    var expectationsSeen by remember { mutableStateOf(FirstRun.seen(ctx)) }
+    if (!expectationsSeen) {
+        FirstRunScreen { FirstRun.markSeen(ctx); expectationsSeen = true }
+        return
+    }
+
     Column(
         Modifier.fillMaxSize().background(T.Page)
             .windowInsetsPadding(WindowInsets.safeDrawing)
