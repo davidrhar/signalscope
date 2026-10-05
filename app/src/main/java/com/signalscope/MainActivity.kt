@@ -20,6 +20,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -66,8 +67,13 @@ private fun Root() {
     var tab by remember { mutableStateOf(Tab.LIVE) }
     // Where the gear was pressed from, so back and the gear itself return there.
     var beforeSettings by remember { mutableStateOf(Tab.LIVE) }
+    /** The incident history, opened from Now rather than reached from the bottom bar. */
+    var historyOpen by remember { mutableStateOf(false) }
+    /** Whether the raw instrument is unfolded on Now. Remembered for the session. */
+    var detailOpen by rememberSaveable { mutableStateOf(false) }
     var mapOpensShare by remember { mutableStateOf(false) }
     BackHandler(enabled = tab == Tab.SETTINGS) { tab = beforeSettings }
+    BackHandler(enabled = tab == Tab.LIVE && historyOpen) { historyOpen = false }
     var selected by remember { mutableStateOf<Int?>(null) }
     val ordered = sims.values.sortedBy { it.slot }
     val active = ordered.firstOrNull { it.subId == selected } ?: ordered.firstOrNull()
@@ -146,6 +152,14 @@ private fun Root() {
             return@Column
         }
 
+        // History, opened from Now. Full height while it is open, because it is a list and a
+        // list inside a scrolling column is both illegal in Compose and unreadable in practice.
+        if (historyOpen) {
+            Box(Modifier.weight(1f)) { TimelineScreen() }
+            BottomNav(tab) { historyOpen = false; mapOpensShare = false; tab = it }
+            return@Column
+        }
+
         Column(
             Modifier.weight(1f).verticalScroll(rememberScrollState())
                 .padding(horizontal = 16.dp)
@@ -173,19 +187,40 @@ private fun Root() {
             RouteCard(net)
 
             if (active != null) {
-                // Before the cell's own numbers, because "this mast has done this to you before"
-                // is the answer to the question being asked while a call breaks up, and the
-                // numbers are the evidence for it rather than the point.
                 // Where you are now, then what this mast has done before: the live fact first,
-                // because it is the one the person is asking about while a call breaks up.
+                // because it is the one the person is asking about while a call breaks up, and
+                // the numbers below are the evidence for it rather than the point.
                 AreaCard()
                 SiteCard(active)
-                SecHead("Serving cell", "updated live")
-                CellCard(active)
-                SecHead("Registration", "sub ${active.subId}")
-                RegCard(active)
-                SecHead("This device", "discovered, not assumed")
-                DeviceCard(profile, sp)
+
+                // What happened, which is history of the thing above it rather than a separate
+                // place to visit. It used to be a tab of its own, which asked somebody wondering
+                // why their call dropped to go and look somewhere else for the answer.
+                val incidents = rememberIncidents()
+                val recent = incidents?.incidents?.count { it.subId == active.subId } ?: 0
+                SecHead("What happened", if (recent == 0) "nothing recorded yet" else "$recent recorded")
+                if (recent > 0) {
+                    Btn("Open the history", ghost = true) { historyOpen = true }
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                // The instrument. Folded away by default: these are the numbers the app was
+                // built to collect, and they are exactly what a stranger does not need in order
+                // to find out whether it is them. Opened once, it stays open.
+                SecHead(
+                    if (detailOpen) "Hide the detail" else "Show the detail",
+                    "serving cell · registration · device"
+                )
+                Btn(if (detailOpen) "Hide" else "Show", ghost = true) { detailOpen = !detailOpen }
+                if (detailOpen) {
+                    Spacer(Modifier.height(10.dp))
+                    SecHead("Serving cell", "updated live")
+                    CellCard(active)
+                    SecHead("Registration", "sub ${active.subId}")
+                    RegCard(active)
+                    SecHead("This device", "discovered, not assumed")
+                    DeviceCard(profile, sp)
+                }
             }
 
             Spacer(Modifier.height(18.dp))
@@ -448,7 +483,6 @@ private fun BottomNav(current: Tab, onSelect: (Tab) -> Unit) {
         horizontalArrangement = Arrangement.SpaceEvenly
     ) {
         NavItem(Tab.LIVE, Icons.Filled.PlayArrow, current, onSelect)
-        NavItem(Tab.TIMELINE, Icons.Filled.List, current, onSelect)
         NavItem(Tab.MAP, Icons.Filled.Place, current, onSelect)
         NavItem(Tab.DIAGNOSIS, Icons.Filled.Search, current, onSelect)
     }

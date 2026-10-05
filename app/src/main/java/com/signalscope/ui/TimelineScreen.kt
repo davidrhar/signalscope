@@ -102,26 +102,26 @@ private fun Incident.matches(f: Filter) = when (f) {
 
 // ------------------------------------------------------------------ screen
 
+/**
+ * The incident derivation, shared.
+ *
+ * Extracted so the Now screen can say how many there are without running the engine a second
+ * time, and so the two can never disagree about what has happened -- which is exactly the kind
+ * of split that produced four different answers to "is something wrong" last week.
+ */
 @Composable
-fun TimelineScreen(modifier: Modifier = Modifier) {
+fun rememberIncidents(): IncidentEngine.Result? {
     val ctx = LocalContext.current
     val sims by LiveState.sims.collectAsStateWithLifecycle()
     val counters by LiveState.counters.collectAsStateWithLifecycle()
-
     var result by remember { mutableStateOf<IncidentEngine.Result?>(null) }
-    var loaded by remember { mutableStateOf(false) }
-    var sub by remember { mutableStateOf<Int?>(null) }
-    var filter by remember { mutableStateOf(Filter.ALL) }
-    var open by remember { mutableStateOf<String?>(null) }
 
     // Re-derive as rows accumulate. Keyed on coarsened counts so a busy collector does not
     // re-run the engine on every single callback.
     LaunchedEffect(counters.radioRows / 20, counters.regRows / 5, counters.linkRows / 5, sims.size) {
-        // The read and the derivation both run against live storage: a corrupt or
-        // mid-migration database throws SQLiteException, and an unhandled throw inside a
-        // LaunchedEffect takes the whole activity down. MapBinBuilder.build() already fails to
-        // an empty model for exactly this reason; the timeline now does the same, keeping the
-        // last good result on screen instead of crashing to the launcher.
+        // The read and the derivation both run against live storage: a corrupt or mid-migration
+        // database throws SQLiteException, and an unhandled throw inside a LaunchedEffect takes
+        // the whole activity down. Keep the last good result on screen instead of crashing.
         val next = runCatching {
             withContext(Dispatchers.IO) {
                 val rows = IncidentStore.load(ctx)
@@ -129,8 +129,20 @@ fun TimelineScreen(modifier: Modifier = Modifier) {
             }
         }.getOrNull()
         if (next != null) result = next
-        loaded = true
     }
+    return result
+}
+
+@Composable
+fun TimelineScreen(modifier: Modifier = Modifier) {
+    val sims by LiveState.sims.collectAsStateWithLifecycle()
+
+    val result = rememberIncidents()
+    val loaded = result != null
+    var sub by remember { mutableStateOf<Int?>(null) }
+    var filter by remember { mutableStateOf(Filter.ALL) }
+    var open by remember { mutableStateOf<String?>(null) }
+
 
     val res = result
     val subIds = res?.subIds.orEmpty()
