@@ -87,8 +87,21 @@ private fun Root() {
     // consent screen decorative.
     var consented by remember { mutableStateOf(Consent.accepted(ctx)) }
 
+    // Both screens below return BEFORE the Column that applies safeDrawing insets, so without
+    // this wrapper they render under the status bar and behind the gesture bar -- edge-to-edge
+    // is the default from Android 15 for anything targeting SDK 35, and Play says so in as many
+    // words. The consent screen has had this since it was written; the first-run screen inherited
+    // it the moment it was added. Both are the first thing anybody ever sees.
+    @Composable
+    fun Framed(content: @Composable () -> Unit) {
+        Box(
+            Modifier.fillMaxSize().background(T.Page)
+                .windowInsetsPadding(WindowInsets.safeDrawing)
+        ) { content() }
+    }
+
     if (!consented) {
-        ConsentScreen(
+        Framed { ConsentScreen(
             onAccept = {
                 Consent.accept(ctx)
                 consented = true
@@ -101,7 +114,7 @@ private fun Root() {
                 )
             },
             onDecline = { Consent.uninstall(ctx) }
-        )
+        ) }
         return
     }
 
@@ -120,7 +133,7 @@ private fun Root() {
     // from the app being broken unless somebody said it was coming. See FirstRun.
     var expectationsSeen by remember { mutableStateOf(FirstRun.seen(ctx)) }
     if (!expectationsSeen) {
-        FirstRunScreen { FirstRun.markSeen(ctx); expectationsSeen = true }
+        Framed { FirstRunScreen { FirstRun.markSeen(ctx); expectationsSeen = true } }
         return
     }
 
@@ -216,10 +229,10 @@ private fun Root() {
                 // The instrument. Folded away by default: these are the numbers the app was
                 // built to collect, and they are exactly what a stranger does not need in order
                 // to find out whether it is them. Opened once, it stays open.
-                SecHead(
-                    if (detailOpen) "Hide the detail" else "Show the detail",
-                    "serving cell · registration · device"
-                )
+                // Short title. SecHead lays the subtitle out on the same row, and
+                // "Show the detail" against "serving cell / registration / device" ran the two
+                // into each other with no gap on a 1080-wide screen.
+                SecHead("Detail", "serving cell · registration · device")
                 Btn(if (detailOpen) "Hide" else "Show", ghost = true) { detailOpen = !detailOpen }
                 if (detailOpen) {
                     Spacer(Modifier.height(10.dp))
