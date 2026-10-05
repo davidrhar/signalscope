@@ -325,7 +325,20 @@ fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
         }
 
         // ---------------------------------------------------------------- top chrome
-        Column(Modifier.align(Alignment.TopStart).fillMaxWidth()) {
+        /*
+         * Top chrome, bounded so it cannot run under the bottom chrome.
+         *
+         * Both are absolutely positioned in the same Box, and the top column grew as panels
+         * opened. On a short screen the layer panel ran beneath the floating Legend / Share /
+         * My location row and the two were drawn on top of each other, with the panel's text
+         * unreadable behind the chips. Capping the top column and letting it scroll means a long
+         * panel is reachable instead of being hidden under something else.
+         */
+        Column(
+            Modifier.align(Alignment.TopStart).fillMaxWidth()
+                .padding(bottom = 76.dp)
+                .verticalScroll(rememberScrollState())
+        ) {
             /*
              * Three chips that fit, instead of two rows that scroll.
              *

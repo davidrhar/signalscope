@@ -13,6 +13,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
@@ -26,11 +27,24 @@ fun SecHead(title: String, aux: String? = null) {
         Modifier.fillMaxWidth().padding(start = 2.dp, end = 2.dp, top = 14.dp, bottom = 6.dp),
         verticalAlignment = Alignment.Bottom
     ) {
+        // The TITLE takes its own width and the aux gives way, not the other way round.
+        //
+        // With weight(1f) on the title and none on the aux, the aux was measured first at its
+        // full intrinsic width and the title got the remainder -- so on a narrow screen a long
+        // aux squeezed the title to a few pixels and it wrapped one letter per line: "DE / TA /
+        // IL". The aux is supplementary by definition; it is the thing that should shorten.
         Text(
             title.uppercase(), color = T.Faint, fontSize = 10.sp, fontFamily = Mono,
-            fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp, modifier = Modifier.weight(1f)
+            fontWeight = FontWeight.Bold, letterSpacing = 1.4.sp, maxLines = 1
         )
-        if (aux != null) Text(aux, color = T.Faint, fontSize = 10.sp, fontFamily = Mono)
+        if (aux != null) {
+            Spacer(Modifier.width(10.dp))
+            Text(
+                aux, color = T.Faint, fontSize = 10.sp, fontFamily = Mono,
+                maxLines = 1, overflow = TextOverflow.Ellipsis,
+                textAlign = TextAlign.End, modifier = Modifier.weight(1f)
+            )
+        }
     }
 }
 
