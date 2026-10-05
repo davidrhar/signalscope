@@ -3,6 +3,8 @@ package com.signalscope.ui
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -133,6 +135,7 @@ fun rememberIncidents(): IncidentEngine.Result? {
     return result
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TimelineScreen(
     modifier: Modifier = Modifier,
@@ -215,10 +218,14 @@ fun TimelineScreen(
             item { ConnectionHealthPanel(compact = true) }
 
             item {
-                Row(
-                    Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())
-                        .padding(vertical = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                // Wraps rather than scrolls. There are six of these and the last two sat off
+                // the right edge of the screen, which is the same way the shared-map control
+                // went unnoticed for two days: a filter you cannot see is a filter nobody uses.
+                // They are short and few, so a second line costs almost nothing.
+                FlowRow(
+                    Modifier.fillMaxWidth().padding(vertical = 10.dp),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Filter.entries.forEach { f ->
                         val n = forSub.count { it.matches(f) }

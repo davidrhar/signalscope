@@ -234,7 +234,10 @@ private fun Root() {
                 // Short title. SecHead lays the subtitle out on the same row, and
                 // "Show the detail" against "serving cell / registration / device" ran the two
                 // into each other with no gap on a 1080-wide screen.
-                SecHead("Detail", "signal · route · cell · registration · device")
+                // Short enough not to need ellipsising on a narrow screen. SecHead will shorten an aux
+                // rather than break the title now, but a subtitle that is always truncated is one
+                // nobody can read, which is no better than the collision it replaced.
+                SecHead("Detail", "signal · cell · device")
                 Btn(if (detailOpen) "Hide" else "Show", ghost = true) { detailOpen = !detailOpen }
                 if (detailOpen) {
                     Spacer(Modifier.height(10.dp))
