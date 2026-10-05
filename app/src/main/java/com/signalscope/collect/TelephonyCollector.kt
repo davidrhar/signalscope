@@ -209,6 +209,10 @@ class TelephonyCollector(
             ?: cellInfo.firstOrNull { it.isRegistered }
             ?: return base.copy(servingReported = false, primaryCells = primaries)
         val connStatus = runCatching { serving.cellConnectionStatus }.getOrNull()
+        // How many of the reported cells are on the channel ServiceState names as the primary
+        // carrier's. If this is reliably 1, it identifies the primary cell and can replace a
+        // selection rule that provably does not work on this chipset.
+        val matches = base.ssChannel?.let { ch -> cellInfo.count { arfcnOf(it) == ch } }
         val ageMs = (SystemClock.elapsedRealtime() - serving.timestampMillis).coerceAtLeast(0L)
         val readingWall = System.currentTimeMillis() - ageMs
         return when (val id = serving.cellIdentity) {
@@ -222,7 +226,7 @@ class TelephonyCollector(
                     arfcn = earfcn, band = derived?.band ?: reported,
                     bandReported = reported, bandDerived = derived?.band,
                     bandAmbiguous = derived?.ambiguous == true, cellRat = Bands.LTE,
-                    connStatus = connStatus, primaryCells = primaries,
+                    connStatus = connStatus, primaryCells = primaries, channelMatches = matches,
                     plmn = plmn, cellMillis = readingWall, servingReported = true
                 )
             }
@@ -236,14 +240,15 @@ class TelephonyCollector(
                     arfcn = nrarfcn, band = derived?.band ?: reported,
                     bandReported = reported, bandDerived = derived?.band,
                     bandAmbiguous = derived?.ambiguous == true, cellRat = Bands.NR,
-                    connStatus = connStatus, primaryCells = primaries,
+                    connStatus = connStatus, primaryCells = primaries, channelMatches = matches,
                     plmn = plmn, cellMillis = readingWall, servingReported = true
                 )
             }
             // Registered on GSM/WCDMA or something newer than this code: we hold no identity for
             // it, and the LTE/NR identity from before is precisely the carried-forward cell the
             // writer must not store.
-            else -> base.copy(servingReported = false, connStatus = connStatus, primaryCells = primaries)
+            else -> base.copy(servingReported = false, connStatus = connStatus,
+                primaryCells = primaries, channelMatches = matches)
         }
     }
 
@@ -403,6 +408,13 @@ class TelephonyCollector(
     private fun mccMnc(mcc: String?, mnc: String?): String? =
         if (mcc.isNullOrBlank() || mnc.isNullOrBlank()) null else "$mcc-$mnc"
 
+    /** The channel a cell sits on, whichever technology it is. Null when it does not say. */
+    private fun arfcnOf(c: CellInfo): Int? = when (val id = c.cellIdentity) {
+        is CellIdentityLte -> nz(id.earfcn)
+        is CellIdentityNr -> nz(id.nrarfcn)
+        else -> null
+    }
+
     private fun nz(v: Int): Int? = if (v == CellInfo.UNAVAILABLE) null else v
     private fun nzL(v: Long): Long? = if (v == CellInfo.UNAVAILABLE.toLong() || v == Long.MAX_VALUE) null else v
 
@@ -521,6 +533,10 @@ class TelephonyCollector(
                 }
                 it.copy(
                     cellBandwidths = bw, bandwidthsCi = it.ci, bandwidthsArfcn = bwArfcn,
+                    // Kept separately from bandwidthsArfcn, which is only set when widths are
+                    // present and is carried forward across reports. This is simply what
+                    // ServiceState said this time.
+                    ssChannel = channel,
                     serviceState = stateStr,
                     roaming = state.roaming,
                     psRegistered = ps?.isRegistered,
@@ -843,6 +859,7 @@ class TelephonyCollector(
                         bandReported = id?.bandReported, bandDerived = id?.bandDerived,
                         cellRat = id?.cellRat,
                         connStatus = id?.connStatus, primaryCells = id?.primaryCells,
+                        ssChannel = id?.ssChannel, channelMatches = id?.channelMatches,
                         cellAgeMs = cellAge,
                         ssRsrp = sig.ssRsrp, ssRsrq = sig.ssRsrq, ssSinr = sig.ssSinr,
                         nrPresent = sig.nrPresent,

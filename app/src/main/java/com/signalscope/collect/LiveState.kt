@@ -86,6 +86,9 @@ data class SimState(
     /** See RadioSample.connStatus. Diagnostic: is the primary-serving API usable on this chipset? */
     val connStatus: Int? = null,
     val primaryCells: Int? = null,
+    /** ServiceState's own channel number, and how many reported cells sit on it. Diagnostic. */
+    val ssChannel: Int? = null,
+    val channelMatches: Int? = null,
     /**
      * Whether the most recent cell-info report contained a registered LTE/NR cell. Null until the
      * first report. When false, [pci]/[ci]/[band] still hold the last known cell -- the dashboard
