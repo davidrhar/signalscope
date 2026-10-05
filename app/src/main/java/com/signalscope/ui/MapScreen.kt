@@ -378,7 +378,8 @@ fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
             // to do nothing but recolour -- which is what the user reported. It is hidden while
             // a bin sheet or the regions panel is open: those answer the same question about one
             // place, and two panels would fight for the same screen.
-            if (m != null && detailOpen && selected == null && !regionsOpen) LayerPanel(m, layer)
+            if (m != null && detailOpen && selected == null && !regionsOpen)
+                LayerPanel(m, layer, crowdOn, crowd)
             // Empty and sparse are first-class states, not an error screen. It sits in the flow
             // under the status strip rather than floating over it, so the two can never disagree
             // on screen about what has actually been measured.
@@ -972,8 +973,27 @@ private class Pooled(bins: List<Bin>) {
  * rate is led with as the most direct measurement available, not as a proven predictor.
  */
 @Composable
-private fun LayerPanel(m: MapModel, layer: MapLayer) {
+private fun LayerPanel(m: MapModel, layer: MapLayer, crowdOn: Boolean, crowd: SharedMap.Snapshot?) {
     val surveyed = m.bins.filter { it.cls != 0 }
+
+    // What everyone else's data amounts to, said where someone is already asking what they are
+    // looking at. This lived in EmptyState, which renders only when the map has no bins of your
+    // own -- so the one question it answered was answered only when nobody would ask it.
+    SecHead("Shared map", "from other phones")
+    Text(
+        when {
+            !crowdOn -> "Layer off. The chip in the top row turns it back on."
+            crowd == null -> "Not loaded yet."
+            crowd.cells.isEmpty() ->
+                "Nothing published yet. An area appears once ${crowd.minContributors} separate " +
+                    "phones have measured it, and nothing here has reached that."
+            else -> "${crowd.cells.size} areas from other phones, published ${crowd.generated}. " +
+                "They may be nowhere near you -- this is everyone's map, not a local one."
+        },
+        color = T.Dim, fontSize = 12.sp, lineHeight = 16.sp
+    )
+    Spacer(Modifier.height(10.dp))
+
     when (layer) {
         MapLayer.QUALITY -> {
             val p = Pooled(m.bins)
@@ -1209,19 +1229,7 @@ private fun EmptyState(
             ERow("observed", "${dur(m.observedMs)} of ${dur(m.spanMs)} · ${pct(it)}", T.Faint)
         }
         ERow("needed", "${MapBinBuilder.N_LOCAL} samples in one bin")
-        // Silence here used to mean two different things -- nobody has contributed, and nobody
-        // has contributed NEAR YOU -- and the map drew the same nothing for both.
-        ERow(
-            "shared map",
-            when {
-                !crowdOn -> "layer off"
-                crowd == null -> "not loaded yet"
-                crowd.cells.isEmpty() ->
-                    "nothing published yet · an area needs ${crowd.minContributors} phones"
-                else -> "${crowd.cells.size} areas from other phones · ${crowd.generated}"
-            },
-            T.Faint
-        )
+        ERow("shared map", "see the layer panel", T.Faint)
         Spacer(Modifier.height(8.dp))
         val ctx = LocalContext.current
         // Asked here rather than trusted from state: the collector checks it when it starts the
