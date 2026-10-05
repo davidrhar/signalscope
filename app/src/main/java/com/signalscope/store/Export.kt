@@ -277,7 +277,7 @@ object Export {
                             "servingCi", "servingTac", "servingArfcn", "bandNum", "mcc", "mnc",
                             "rsrp", "rsrq", "rssnr", "cqi", "timingAdvance", "level", "vendorLevel",
                             "dataActivity", "neighbourCount", "bandReported", "bandDerived", "cellRat",
-                            "connStatus", "primaryCells", "ssChannel", "channelMatches",
+                            "connStatus", "primaryCells", "ssChannel", "channelMatches", "regCells", "regChannels",
                             "cellAgeMs", "ssRsrp", "ssRsrq", "ssSinr", "nrPresent", "qualityFlags",
                             "cellBandwidths", "indoorProb"),
                         // The schema-3 columns are measurements of what was already here -- the
@@ -287,7 +287,7 @@ object Export {
                         "SELECT elapsedNanos, wallMillis, subId, mode, rat, servingPci, servingCi, " +
                             "servingTac, servingArfcn, bandNum, mcc, mnc, rsrp, rsrq, rssnr, cqi, " +
                             "timingAdvance, level, vendorLevel, dataActivity, neighbourCount, " +
-                            "bandReported, bandDerived, cellRat, connStatus, primaryCells, ssChannel, channelMatches, cellAgeMs, ssRsrp, ssRsrq, ssSinr, " +
+                            "bandReported, bandDerived, cellRat, connStatus, primaryCells, ssChannel, channelMatches, regCells, regChannels, cellAgeMs, ssRsrp, ssRsrq, ssSinr, " +
                             "nrPresent, qualityFlags, cellBandwidths, indoorProb " +
                             "FROM radio_sample ORDER BY elapsedNanos ASC"
                     ) { rows = it }

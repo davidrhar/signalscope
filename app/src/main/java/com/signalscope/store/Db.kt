@@ -72,6 +72,18 @@ data class RadioSample(
     val ssChannel: Int? = null,
     val channelMatches: Int? = null,
     /**
+     * How many cells in the report were REGISTERED, and how many distinct channels they sat on.
+     *
+     * The question that decides whether this is the app's fault or the platform's. If two cells
+     * are registered at the same instant, on two channels, then carrier aggregation is being
+     * reported honestly and `firstOrNull { isRegistered }` is choosing between them arbitrarily --
+     * a better rule exists. If only ONE is ever registered and which one it is alternates, there
+     * is nothing to choose: the modem is flipping its own answer, no selection rule can be stable,
+     * and the mast record has to be keyed on (site, band) instead of pretending there is one site.
+     */
+    val regCells: Int? = null,
+    val regChannels: Int? = null,
+    /**
      * Age of the serving-cell identity at write time: wall-now minus the modem's own measurement
      * time. Null when no registered cell has ever been reported. A cached cell-info report is how a
      * twenty-minute-old identity used to pass as current; this makes that visible per row.
@@ -301,7 +313,7 @@ interface CollectorDao {
     entities = [RadioSample::class, RegistrationEvent::class, LinkEvent::class,
         ProbeResult::class, NeighbourCell::class, InstrumentEvent::class, BinAgg::class,
         SiteStat::class, BinHourStat::class],
-    version = 10,
+    version = 11,
     exportSchema = false
 )
 abstract class Db : RoomDatabase() {
@@ -485,6 +497,17 @@ abstract class Db : RoomDatabase() {
             "ALTER TABLE `radio_sample` ADD COLUMN `channelMatches` INTEGER"
         )
 
+        internal val MIGRATION_10_11_SQL = listOf(
+            "ALTER TABLE `radio_sample` ADD COLUMN `regCells` INTEGER",
+            "ALTER TABLE `radio_sample` ADD COLUMN `regChannels` INTEGER"
+        )
+
+        private val MIGRATION_10_11 = object : androidx.room.migration.Migration(10, 11) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                MIGRATION_10_11_SQL.forEach { db.execSQL(it) }
+            }
+        }
+
         private val MIGRATION_9_10 = object : androidx.room.migration.Migration(9, 10) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 MIGRATION_9_10_SQL.forEach { db.execSQL(it) }
@@ -512,7 +535,7 @@ abstract class Db : RoomDatabase() {
         @Volatile private var inst: Db? = null
         fun get(ctx: Context): Db = inst ?: synchronized(this) {
             inst ?: Room.databaseBuilder(ctx.applicationContext, Db::class.java, "signalscope.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                 .build().also { inst = it }
         }
     }

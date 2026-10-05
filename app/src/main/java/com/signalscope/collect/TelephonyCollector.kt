@@ -212,7 +212,13 @@ class TelephonyCollector(
         // How many of the reported cells are on the channel ServiceState names as the primary
         // carrier's. If this is reliably 1, it identifies the primary cell and can replace a
         // selection rule that provably does not work on this chipset.
-        val matches = base.ssChannel?.let { ch -> cellInfo.count { arfcnOf(it) == ch } }
+        // REGISTERED cells only. The first version of this counted every reported cell, which
+        // cannot tell "four neighbours share this frequency" from "two carriers are in use on it"
+        // -- and the second is the only one that means anything here.
+        val registered = cellInfo.filter { it.isRegistered }
+        val matches = base.ssChannel?.let { ch -> registered.count { arfcnOf(it) == ch } }
+        val regCount = registered.size
+        val regChans = registered.mapNotNull { arfcnOf(it) }.distinct().size
         val ageMs = (SystemClock.elapsedRealtime() - serving.timestampMillis).coerceAtLeast(0L)
         val readingWall = System.currentTimeMillis() - ageMs
         return when (val id = serving.cellIdentity) {
@@ -227,6 +233,7 @@ class TelephonyCollector(
                     bandReported = reported, bandDerived = derived?.band,
                     bandAmbiguous = derived?.ambiguous == true, cellRat = Bands.LTE,
                     connStatus = connStatus, primaryCells = primaries, channelMatches = matches,
+                    regCells = regCount, regChannels = regChans,
                     plmn = plmn, cellMillis = readingWall, servingReported = true
                 )
             }
@@ -241,6 +248,7 @@ class TelephonyCollector(
                     bandReported = reported, bandDerived = derived?.band,
                     bandAmbiguous = derived?.ambiguous == true, cellRat = Bands.NR,
                     connStatus = connStatus, primaryCells = primaries, channelMatches = matches,
+                    regCells = regCount, regChannels = regChans,
                     plmn = plmn, cellMillis = readingWall, servingReported = true
                 )
             }
@@ -248,7 +256,8 @@ class TelephonyCollector(
             // it, and the LTE/NR identity from before is precisely the carried-forward cell the
             // writer must not store.
             else -> base.copy(servingReported = false, connStatus = connStatus,
-                primaryCells = primaries, channelMatches = matches)
+                primaryCells = primaries, channelMatches = matches,
+                regCells = regCount, regChannels = regChans)
         }
     }
 
@@ -860,6 +869,7 @@ class TelephonyCollector(
                         cellRat = id?.cellRat,
                         connStatus = id?.connStatus, primaryCells = id?.primaryCells,
                         ssChannel = id?.ssChannel, channelMatches = id?.channelMatches,
+                        regCells = id?.regCells, regChannels = id?.regChannels,
                         cellAgeMs = cellAge,
                         ssRsrp = sig.ssRsrp, ssRsrq = sig.ssRsrq, ssSinr = sig.ssSinr,
                         nrPresent = sig.nrPresent,
