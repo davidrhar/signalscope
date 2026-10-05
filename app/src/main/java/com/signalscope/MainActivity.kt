@@ -69,6 +69,16 @@ private fun Root() {
     var beforeSettings by remember { mutableStateOf(Tab.LIVE) }
     /** The incident history, opened from Now rather than reached from the bottom bar. */
     var historyOpen by remember { mutableStateOf(false) }
+    /**
+     * Hoisted out of the Column it scrolls.
+     *
+     * remember() inside a composable that stops being composed is forgotten, and opening the
+     * history replaces that Column entirely -- so coming back always landed at the top of Now,
+     * however far down the person had been.
+     */
+    val nowScroll = rememberScrollState()
+    /** One derivation for both Now's count and the history itself. */
+    val incidents = rememberIncidents()
     /** Whether the raw instrument is unfolded on Now. Remembered for the session. */
     var detailOpen by rememberSaveable { mutableStateOf(false) }
     var mapOpensShare by remember { mutableStateOf(false) }
@@ -177,13 +187,15 @@ private fun Root() {
         // History, opened from Now. Full height while it is open, because it is a list and a
         // list inside a scrolling column is both illegal in Compose and unreadable in practice.
         if (historyOpen) {
-            Box(Modifier.weight(1f)) { TimelineScreen(onBack = { historyOpen = false }) }
+            Box(Modifier.weight(1f)) {
+                TimelineScreen(onBack = { historyOpen = false }, incidents = incidents)
+            }
             BottomNav(tab) { historyOpen = false; mapOpensShare = false; tab = it }
             return@Column
         }
 
         Column(
-            Modifier.weight(1f).verticalScroll(rememberScrollState())
+            Modifier.weight(1f).verticalScroll(nowScroll)
                 .padding(horizontal = 16.dp)
         ) {
             if (ordered.size > 1) {
@@ -218,7 +230,6 @@ private fun Root() {
                 // What happened, which is history of the thing above it rather than a separate
                 // place to visit. It used to be a tab of its own, which asked somebody wondering
                 // why their call dropped to go and look somewhere else for the answer.
-                val incidents = rememberIncidents()
                 val recent = incidents?.incidents?.count { it.subId == active.subId } ?: 0
                 SecHead("What happened", if (recent == 0) "nothing recorded yet" else "$recent recorded")
                 if (recent > 0) {

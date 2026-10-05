@@ -134,10 +134,15 @@ fun rememberIncidents(): IncidentEngine.Result? {
 }
 
 @Composable
-fun TimelineScreen(modifier: Modifier = Modifier, onBack: (() -> Unit)? = null) {
+fun TimelineScreen(
+    modifier: Modifier = Modifier,
+    onBack: (() -> Unit)? = null,
+    /** Hoisted so Now and this screen cannot derive it separately and disagree. */
+    incidents: IncidentEngine.Result? = null
+) {
     val sims by LiveState.sims.collectAsStateWithLifecycle()
 
-    val result = rememberIncidents()
+    val result = incidents ?: rememberIncidents()
     val loaded = result != null
     var sub by remember { mutableStateOf<Int?>(null) }
     var filter by remember { mutableStateOf(Filter.ALL) }
