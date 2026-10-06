@@ -282,9 +282,8 @@ fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
         // and quietly disappears on a single-network phone, where the filter would be furniture.
         val networks = remember(m?.bins) {
             m?.bins.orEmpty()
-                .filter { it.cls != 0 }
                 .groupingBy { it.plmn }.eachCount()
-                .entries.filter { it.key != null }
+                .entries.filter { it.key != "—" }
                 .sortedByDescending { it.value }
                 .mapNotNull { it.key }
         }
@@ -872,6 +871,18 @@ private fun StatusStrip(
                     color = T.Warn, fontSize = 9.sp, fontFamily = Mono
                 )
             }
+            val gate by LiveState.locationGate.collectAsStateWithLifecycle()
+            Spacer(Modifier.height(2.dp))
+            Text(
+                "position: ${if (fix.running) "requested" else "not requested"} via " +
+                    "${fix.provider ?: "no provider"} · ${fix.fixCount} fixes kept" +
+                    " · rejected ${fix.rejectedAsStale} stale, ${fix.rejectedForAccuracy} coarse, " +
+                    "${fix.rejectedAsMock} mock" +
+                    (gate?.let { " · service $it" } ?: "") +
+                    (fix.note?.let { " · $it" } ?: ""),
+                color = if (m.unlocated > 0 && !fix.running) T.Warn else T.Faint,
+                fontSize = 9.sp, fontFamily = Mono
+            )
             m.radioCoverage?.let { cov ->
                 Spacer(Modifier.height(2.dp))
                 Text(

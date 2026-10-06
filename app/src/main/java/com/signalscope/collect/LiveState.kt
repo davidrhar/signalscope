@@ -162,6 +162,9 @@ object LiveState {
     val running = MutableStateFlow(false)
     /** non-null when collection is degraded; shown in the UI rather than failing silently */
     val degraded = MutableStateFlow<String?>(null)
+
+    /** Why the service is or is not asking for position right now, for the map's detail panel. */
+    val locationGate = MutableStateFlow<String?>(null)
     /** discovered at first run; nothing device-specific is hardcoded anywhere else */
     val profile = MutableStateFlow<DeviceProfile?>(null)
 

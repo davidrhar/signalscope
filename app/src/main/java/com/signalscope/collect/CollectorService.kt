@@ -286,6 +286,7 @@ class CollectorService : LifecycleService() {
                     moving -> "moving above walking pace"
                     else -> "Wi-Fi holds the default route, position is static"
                 }
+                LiveState.locationGate.value = "${if (want) "on" else "off"}: $why"
                 if (why != lastLocationReason) {
                     lastLocationReason = why
                     android.util.Log.i("Collector", "location ${if (want) "ON" else "off"}: $why")
