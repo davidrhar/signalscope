@@ -13,6 +13,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -199,11 +200,11 @@ private fun Root() {
                 .padding(horizontal = 16.dp)
         ) {
             if (ordered.size > 1) {
-                Row(Modifier.fillMaxWidth().padding(bottom = 2.dp),
+                Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()).padding(bottom = 2.dp),
                     horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     ordered.forEach { s ->
                         Chip(
-                            "${s.carrier.take(10)}${if (s.isDataSub) " · data" else ""}",
+                            chipLabel(s, ordered),
                             s.subId == (active?.subId ?: -1)
                         ) { selected = s.subId }
                     }
@@ -296,7 +297,7 @@ private fun AppHead(
                         " · SIM ${s.slot + 1}"
                     else -> "no subscription — grant phone permission"
                 },
-                color = T.Faint, fontSize = 11.sp, fontFamily = Mono, maxLines = 1
+                color = T.Faint, fontSize = 11.sp, fontFamily = Mono, maxLines = 2
             )
         }
         // The gear sits on the pill's own row rather than beside the whole block. As a sibling of

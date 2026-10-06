@@ -5,6 +5,12 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
 
+/** Chip text for [sim]; SIMs sharing a carrier name get " (1)" / " (2)" from their slot. */
+fun chipLabel(sim: SimState, all: Collection<SimState>): String {
+    val dup = all.count { it.carrier == sim.carrier } > 1
+    return sim.carrier + (if (dup) " (${sim.slot + 1})" else "") + (if (sim.isDataSub) " · data" else "")
+}
+
 /** One subscription's live view, as the dashboard renders it. */
 data class SimState(
     val subId: Int,

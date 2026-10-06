@@ -37,6 +37,7 @@ import com.signalscope.collect.IncidentEngine.Layer
 import com.signalscope.collect.IncidentEngine.LayerVerdict
 import com.signalscope.collect.IncidentEngine.Support
 import com.signalscope.collect.LiveState
+import com.signalscope.collect.chipLabel
 import com.signalscope.store.IncidentStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -196,7 +197,7 @@ fun TimelineScreen(
                 subIds.forEach { id ->
                     val s = sims[id]
                     Chip(
-                        "${s?.carrier?.take(10) ?: "sub $id"}${if (s?.isDataSub == true) " · data" else ""}",
+                        s?.let { chipLabel(it, sims.values) } ?: "sub $id",
                         id == activeSub
                     ) { sub = id; open = null }
                 }
