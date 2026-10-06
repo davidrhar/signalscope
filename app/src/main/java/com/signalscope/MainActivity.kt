@@ -89,10 +89,6 @@ private fun Root() {
     val ordered = sims.values.sortedBy { it.slot }
     val active = ordered.firstOrNull { it.subId == selected } ?: ordered.firstOrNull()
 
-    val perms = rememberLauncherForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { CollectorService.start(ctx) }
-
     // Nothing is recorded, and no permission is even asked for, until this has been accepted once.
     // Asking for phone and location first and explaining afterwards is the ordering that makes a
     // consent screen decorative.
@@ -113,36 +109,20 @@ private fun Root() {
 
     if (!consented) {
         Framed { ConsentScreen(
-            onAccept = {
-                Consent.accept(ctx)
-                consented = true
-                perms.launch(
-                    arrayOf(
-                        Manifest.permission.READ_PHONE_STATE,
-                        Manifest.permission.ACCESS_FINE_LOCATION,
-                        Manifest.permission.POST_NOTIFICATIONS
-                    )
-                )
-            },
+            onAccept = { Consent.accept(ctx); consented = true },
             onDecline = { Consent.uninstall(ctx) }
         ) }
         return
-    }
-
-    LaunchedEffect(Unit) {
-        perms.launch(
-            arrayOf(
-                Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.POST_NOTIFICATIONS
-            )
-        )
     }
 
     // After consent and the permission prompts, before anything dense. Almost every screen in
     // this app is silent until it has evidence, and each of those silences is indistinguishable
     // from the app being broken unless somebody said it was coming. See FirstRun.
     var expectationsSeen by remember { mutableStateOf(FirstRun.seen(ctx)) }
+    // Permissions are asked once, on the setup screen, when the person taps each one. Later
+    // gaps are the health strip's job. Starting here rather than in a permission callback means
+    // a launch with nothing denied, or everything denied, behaves the same way.
+    LaunchedEffect(expectationsSeen) { if (expectationsSeen) CollectorService.start(ctx) }
     if (!expectationsSeen) {
         Framed { FirstRunScreen { FirstRun.markSeen(ctx); expectationsSeen = true } }
         return

@@ -1,11 +1,32 @@
 package com.signalscope.ui
 
+import android.Manifest
 import android.content.Context
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
+import android.os.PowerManager
+import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -56,6 +77,19 @@ fun FirstRunScreen(onDone: () -> Unit) {
         Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(22.dp)
     ) {
         Spacer(Modifier.height(18.dp))
+        Text(
+            "Set up",
+            color = T.Text, fontSize = 27.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            "Three permissions, each asked for here once and only when you tap it. " +
+                "You can skip any of them and the rest still works.",
+            color = T.Dim, fontSize = 13.sp, lineHeight = 19.sp
+        )
+        Spacer(Modifier.height(14.dp))
+        SetupRows()
+        Spacer(Modifier.height(26.dp))
         Text(
             "What to expect",
             color = T.Text, fontSize = 27.sp, fontWeight = FontWeight.Bold, letterSpacing = (-0.6).sp
@@ -124,4 +158,89 @@ private fun Item(whenIt: String, what: String) {
     Spacer(Modifier.height(3.dp))
     Text(what, color = T.Dim, fontSize = 12.5.sp, lineHeight = 17.sp)
     Spacer(Modifier.height(15.dp))
+}
+
+
+@Composable
+private fun SetupRows() {
+    val ctx = LocalContext.current
+    var tick by remember { mutableIntStateOf(0) }
+    val owner = LocalLifecycleOwner.current
+    DisposableEffect(owner) {
+        val obs = LifecycleEventObserver { _, e -> if (e == Lifecycle.Event.ON_RESUME) tick++ }
+        owner.lifecycle.addObserver(obs)
+        onDispose { owner.lifecycle.removeObserver(obs) }
+    }
+    val refused = remember { mutableStateMapOf<String, Boolean>() }
+    var asking by remember { mutableStateOf<String?>(null) }
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
+        asking?.let { if (!ok) refused[it] = true }
+        tick++
+    }
+
+    fun has(p: String) = ContextCompat.checkSelfPermission(ctx, p) == PackageManager.PERMISSION_GRANTED
+    fun appSettings() {
+        runCatching {
+            ctx.startActivity(
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", ctx.packageName, null))
+            )
+        }
+    }
+
+    @Composable
+    fun Row(title: String, why: String, granted: Boolean, perm: String?, optional: Boolean = false,
+            onOther: (() -> Unit)? = null) {
+        Text(
+            title + if (optional) "  ·  optional" else "",
+            color = T.Text, fontSize = 15.sp, fontWeight = FontWeight.Bold
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(why, color = T.Dim, fontSize = 12.sp, lineHeight = 17.sp)
+        Spacer(Modifier.height(6.dp))
+        if (granted) {
+            Text("Allowed", color = T.Good, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        } else if (perm != null) {
+            val blocked = refused[perm] == true
+            Btn(if (blocked) "Open app settings" else "Allow", ghost = true) {
+                if (blocked) appSettings() else { asking = perm; launcher.launch(perm) }
+            }
+        } else if (onOther != null) {
+            Btn("Open battery settings", ghost = true) { onOther() }
+        }
+        Spacer(Modifier.height(16.dp))
+    }
+
+    // Read so the rows re-evaluate after a result or after coming back from Settings.
+    tick.let {
+        Row(
+            "Phone",
+            "Reads which network, mast and band is serving you. Without it the app only sees " +
+                "signal strength. It never reads calls, messages or contacts.",
+            has(Manifest.permission.READ_PHONE_STATE), Manifest.permission.READ_PHONE_STATE
+        )
+        Row(
+            "Location",
+            "Puts each reading on the map. Used while the app is collecting; a position is " +
+                "kept in memory only, never stored as a trail.",
+            has(Manifest.permission.ACCESS_FINE_LOCATION), Manifest.permission.ACCESS_FINE_LOCATION
+        )
+        Row(
+            "Notifications",
+            "Tells you when you enter or leave a poor data area.",
+            Build.VERSION.SDK_INT < 33 || has(Manifest.permission.POST_NOTIFICATIONS),
+            Manifest.permission.POST_NOTIFICATIONS
+        )
+        val pm = ctx.getSystemService(PowerManager::class.java)
+        Row(
+            "Battery",
+            "Some phones, Samsung especially, pause apps in the background. Setting SignalScope " +
+                "to unrestricted keeps measuring with the screen off.",
+            pm?.isIgnoringBatteryOptimizations(ctx.packageName) == true, null, optional = true,
+            onOther = {
+                runCatching {
+                    ctx.startActivity(Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+                }
+            }
+        )
+    }
 }
