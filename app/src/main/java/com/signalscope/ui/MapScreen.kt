@@ -280,12 +280,26 @@ fun MapScreen(openShare: Boolean = false, modifier: Modifier = Modifier) {
         // Which network's bins are drawn. Null is everything. Built from what the map actually
         // holds rather than a fixed list, so it names only networks this phone has really seen --
         // and quietly disappears on a single-network phone, where the filter would be furniture.
-        val networks = remember(m?.bins) {
+        val currentNetworks = remember(m?.bins) {
             m?.bins.orEmpty()
                 .groupingBy { it.plmn }.eachCount()
                 .entries.filter { it.key != "—" }
                 .sortedByDescending { it.value }
-                .mapNotNull { it.key }
+                .map { it.key }
+        }
+        // A bin's network is whichever contributed most time to it, and the model is rebuilt every
+        // 15 s and starts empty whenever this screen is recomposed. Both make the list change
+        // under the person's finger, which made this chip appear and vanish while swapping apps.
+        // Once a network has been seen it stays listed for the session.
+        var seenNetworks by androidx.compose.runtime.saveable.rememberSaveable {
+            mutableStateOf(ArrayList<String>())
+        }
+        LaunchedEffect(currentNetworks) {
+            val union = (seenNetworks + currentNetworks).distinct()
+            if (union.size != seenNetworks.size) seenNetworks = ArrayList(union)
+        }
+        val networks = remember(currentNetworks, seenNetworks) {
+            (currentNetworks + seenNetworks).distinct()
         }
 
         /**
