@@ -25,6 +25,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.signalscope.collect.CollectorService
 import com.signalscope.collect.LiveState
 import com.signalscope.collect.MapLocationCollector
+import com.signalscope.collect.MobileData
 
 /**
  * One place that answers "is this app actually working, and if not, why".
@@ -75,6 +76,25 @@ object AppHealth {
         }
     }
 
+    /**
+     * Mobile network settings, where the data switch lives. Falls back to the wireless panel on a
+     * phone whose manufacturer does not honour the first action -- a strip that names the fix and
+     * then does nothing when tapped is worse than one that says nothing.
+     */
+    private fun mobileDataSettings(ctx: Context) {
+        val tries = listOf(
+            Settings.ACTION_DATA_ROAMING_SETTINGS,
+            Settings.ACTION_NETWORK_OPERATOR_SETTINGS,
+            Settings.ACTION_WIRELESS_SETTINGS
+        )
+        for (a in tries) {
+            val ok = runCatching {
+                ctx.startActivity(Intent(a).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            }.isSuccess
+            if (ok) return
+        }
+    }
+
     private fun locationSettings(ctx: Context) {
         runCatching {
             ctx.startActivity(
@@ -120,6 +140,22 @@ object AppHealth {
                 "Without phone permission the app cannot see which network is serving you, " +
                     "which mast, or which band. Signal strength still works; nothing else does.",
                 "Open app permissions", ::appSettings
+            )
+        )
+
+        // Below the SIM check and above location, because it is the one fault that silently
+        // empties the map AND the connection verdict at once, and the app used to report both as
+        // working. Not severe: the phone is behaving exactly as its owner set it, the radio is
+        // still being read, and colouring a deliberate setting red would train the strip to be
+        // ignored. It still has to be said, because nothing else says it.
+        val bearer = MobileData.state(ctx)
+        if (bearer == MobileData.State.SWITCHED_OFF) add(
+            Issue(
+                "Mobile data is off",
+                "There is no mobile connection to test, so the coverage map stays grey and the " +
+                    "connection verdict has nothing to report. Signal strength, the mast record " +
+                    "and the zone alerts carry on — they read the radio, not data.",
+                "Open mobile network settings", ::mobileDataSettings, severe = false
             )
         )
 

@@ -192,8 +192,13 @@ object PlainLanguage {
      * Success comes first and latency second, because a connection that fails is not a slow
      * connection. Both limbs are reported with the evidence behind them, and neither is reported
      * before there is enough of it.
+     *
+     * [bearerWhy] is [com.signalscope.collect.MobileData.why]: the phone's own reason for having
+     * no mobile connection, passed in rather than looked up so this stays a pure function of the
+     * rows. Without it the remedy line told a phone with mobile data switched off to "leave
+     * collecting switched on and come back", which it could have done for ever.
      */
-    fun connectionHealth(s: ProbeStats): Verdict {
+    fun connectionHealth(s: ProbeStats, bearerWhy: String? = null): Verdict {
         val numbers = healthNumbers(s)
 
         if (!s.anyMeasurement) {
@@ -205,13 +210,11 @@ object PlainLanguage {
                     "Nothing has tested the mobile connection yet, so there is nothing to report — " +
                         "not \"it is fine\"."
             }
-            return absent(
-                "Not measured yet.",
-                why,
-                "A test runs about every 45 seconds while mobile data is carrying the phone, and " +
-                    "every few minutes while you are on Wi-Fi. Leave collecting switched on and " +
-                    "come back."
-            ).copy(numbers = numbers)
+            val remedy = bearerWhy
+                ?: ("A test runs about every 45 seconds while mobile data is carrying the phone, " +
+                    "and every few minutes while you are on Wi-Fi. Leave collecting switched on " +
+                    "and come back.")
+            return absent("Not measured yet.", why, remedy).copy(numbers = numbers)
         }
 
         if (s.coldTotal < MIN_WAKEUPS) {

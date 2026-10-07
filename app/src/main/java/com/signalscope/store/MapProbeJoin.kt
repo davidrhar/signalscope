@@ -161,7 +161,13 @@ object MapProbeJoin {
             // A stall summary is not a sample of this place: the stall is already here as the
             // failed probe that opened it, and the summary was written because it failed.
             if (kind == com.signalscope.collect.CellProbe.Kind.RECOVERY) return
-            if (!p.onBearer) { noBearer++; return }
+            // Both tests, not one. `netId` is read when the row is WRITTEN and the reservation can
+            // be granted in the moment between the probe giving up and the row being stored, which
+            // would leave a row that measured nothing carrying a real network id. The kind is
+            // decided by the probe itself and cannot drift that way.
+            if (kind == com.signalscope.collect.CellProbe.Kind.NO_BEARER || !p.onBearer) {
+                noBearer++; return
+            }
             n++
             if (p.ok) {
                 okLatency.add(p.latencyMs)

@@ -264,7 +264,7 @@ object CellProbe {
      * string. A probe kind added later would have been silently absorbed by one filter and
      * silently dropped by the other, with no error anywhere. Classify here instead.
      */
-    enum class Kind { REACHABILITY, TRANSFER, INSTRUMENT, RECOVERY, UNKNOWN }
+    enum class Kind { REACHABILITY, TRANSFER, INSTRUMENT, RECOVERY, NO_BEARER, UNKNOWN }
 
     /**
      * One summary row per stall: how long after a timed-out probe the network was usable again.
@@ -288,13 +288,29 @@ object CellProbe {
      * forget the other.
      */
     fun excludedFromRates(probeType: String, errorCode: String?): Boolean =
-        kindOf(probeType, errorCode).let { it == Kind.INSTRUMENT || it == Kind.RECOVERY }
+        kindOf(probeType, errorCode).let {
+            it == Kind.INSTRUMENT || it == Kind.RECOVERY || it == Kind.NO_BEARER
+        }
 
     /**
      * Rows recorded when the app could not bind a socket to the cellular network at all. They
      * describe this app, not the network, and are excluded from every success and failure rate.
      */
     const val KIND_INSTRUMENT = "BINDFAIL"
+
+    /**
+     * Rows recorded when there was no cellular network to bind to in the first place.
+     *
+     * These are not failures of anything. A phone with mobile data switched off keeps its IMS
+     * networks up for calling, and those carry no data, so every probe on such a phone ends here.
+     * Measured on a second handset: 742 of 742 rows over eight days -- all of which the type alone
+     * read as `TCP` + `FAIL`, which is to say as a total cellular outage that never happened.
+     *
+     * It gets its own kind for the same reason [KIND_INSTRUMENT] does: so that one classifier
+     * excludes it everywhere, rather than two consumers filtering on `netId` and two others
+     * forgetting to.
+     */
+    const val KIND_NOBEARER = "NOBEARER"
 
     /**
      * Classify a stored row, using its error text as well as its type.
@@ -304,15 +320,24 @@ object CellProbe {
      * thing that made four journeys and three excursions look like a total cellular outage. The
      * error text is the only surviving evidence of what they really were, so it is honoured.
      */
-    fun kindOf(probeType: String, errorCode: String?): Kind =
-        if (errorCode != null && errorCode.contains("Binding socket")) Kind.INSTRUMENT
-        else kindOf(probeType)
+    fun kindOf(probeType: String, errorCode: String?): Kind = when {
+        errorCode == null -> kindOf(probeType)
+        errorCode.contains("Binding socket") -> Kind.INSTRUMENT
+        // Same reasoning, same remedy: every row written before KIND_NOBEARER existed carries an
+        // ordinary probe type, and its error text is the only surviving evidence of what it was.
+        errorCode.contains(NO_BEARER_DETAIL) -> Kind.NO_BEARER
+        else -> kindOf(probeType)
+    }
+
+    /** The exact text [probeOnce] records, and the key older rows are recovered by. */
+    const val NO_BEARER_DETAIL = "no cellular network"
 
     fun isReachability(probeType: String, errorCode: String?) =
         kindOf(probeType, errorCode) == Kind.REACHABILITY
 
     fun kindOf(probeType: String): Kind = when {
         probeType.startsWith(KIND_INSTRUMENT) -> Kind.INSTRUMENT
+        probeType.startsWith(KIND_NOBEARER) -> Kind.NO_BEARER
         probeType.startsWith(KIND_RECOVERY) -> Kind.RECOVERY
         probeType.startsWith("UP") || probeType.startsWith("DOWN") -> Kind.TRANSFER
         probeType.startsWith("TLS") || probeType.startsWith("TCP") ||
@@ -337,7 +362,7 @@ object CellProbe {
         // requestNetwork is asynchronous: the first probe after service start would otherwise fire
         // before onAvailable and report "no cellular network" when one was moments away.
         val net = awaitCellular(15_000)
-            ?: return@withContext Result(false, "TCP", 0, "no cellular network", family)
+            ?: return@withContext Result(false, KIND_NOBEARER, 0, NO_BEARER_DETAIL, family)
         val t0 = SystemClock.elapsedRealtime()
         runCatching {
             // DNS on the cellular network, not the default one.
@@ -461,6 +486,11 @@ object CellProbe {
                     // We cannot measure the network if we cannot reach it. Stop rather than record a
                     // length that is really the length of our own fault.
                     abortReason = "abandoned: app could not bind to the cellular network"
+                    break
+                }
+                if (r.kind == KIND_NOBEARER) {
+                    // Nor if there is no network at all. A stall needs something to stall.
+                    abortReason = "abandoned: no cellular network to recover"
                     break
                 }
                 if (r.ok) { recoveredAt = SystemClock.elapsedRealtime(); break }

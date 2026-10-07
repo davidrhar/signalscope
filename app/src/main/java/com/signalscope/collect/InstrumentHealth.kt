@@ -165,18 +165,43 @@ object InstrumentHealth {
             val since = System.currentTimeMillis() - PROBE_WINDOW_MS
             Db.get(ctx).dao().probesSinceWall(since)
         }.getOrDefault(emptyList())
-        val instrumentRows = probes.count {
-            CellProbe.kindOf(it.probeType, it.errorCode) == CellProbe.Kind.INSTRUMENT
-        }
-        val share = if (probes.isEmpty()) 0.0 else instrumentRows.toDouble() / probes.size
+        val kinds = probes.map { CellProbe.kindOf(it.probeType, it.errorCode) }
+        val instrumentRows = kinds.count { it == CellProbe.Kind.INSTRUMENT }
+        // A probe that found no cellular network tested nothing. Counting it as a test is how a
+        // phone with mobile data switched off reported "742 tests" and a clean bill of health --
+        // see [MobileData]. It is subtracted from the denominator before anything is judged.
+        val noBearerRows = kinds.count { it == CellProbe.Kind.NO_BEARER }
+        val realTests = probes.size - noBearerRows
+        val share = if (realTests <= 0) 0.0 else instrumentRows.toDouble() / realTests
+        val bearer = MobileData.state(ctx)
         checks += when {
             CellProbe.instrumentBroken || share > INSTRUMENT_SHARE_BAD -> Check(
                 "Testing the mobile connection", Level.BROKEN,
-                "$instrumentRows of ${probes.size} recent tests could not be started at all -- " +
+                "$instrumentRows of $realTests recent tests could not be started at all -- " +
                     "the app was refused permission to use the mobile connection directly. Those " +
                     "are not network failures and are excluded from every result, but while this " +
                     "lasts the mobile connection is going unmeasured.",
                 "It repairs itself. If it persists, reopening the app clears it."
+            )
+            // Said before the empty case, because the reason is the useful part either way: with
+            // nothing to bind to, "no tests" and "742 tests that tested nothing" are one state.
+            bearer == MobileData.State.SWITCHED_OFF -> Check(
+                "Testing the mobile connection", Level.DEGRADED,
+                (MobileData.why(bearer) ?: "") + " " +
+                    (if (noBearerRows > 0)
+                        "$noBearerRows attempts in the last ${PROBE_WINDOW_MS / 60_000} minutes " +
+                            "found nothing to test; none of them is counted as a result."
+                     else "Nothing has been tested.") +
+                    " Signal strength, the mast record and the zone alerts are unaffected -- they " +
+                    "read the radio, which does not need data.",
+                "Switch mobile data on to measure the connection. Everything else keeps working " +
+                    "either way."
+            )
+            realTests <= 0 && noBearerRows > 0 -> Check(
+                "Testing the mobile connection", Level.DEGRADED,
+                "$noBearerRows attempts in the last ${PROBE_WINDOW_MS / 60_000} minutes found no " +
+                    "mobile data connection to test. " + (MobileData.why(bearer) ?: ""),
+                "Nothing here is a network failure; none of it is counted as a result."
             )
             probes.isEmpty() -> Check(
                 "Testing the mobile connection", Level.UNKNOWN,
@@ -185,8 +210,10 @@ object InstrumentHealth {
             )
             else -> Check(
                 "Testing the mobile connection", Level.OK,
-                "${probes.size} tests in the last ${PROBE_WINDOW_MS / 60_000} minutes" +
-                    if (instrumentRows > 0) ", $instrumentRows of them not startable." else "."
+                "$realTests tests in the last ${PROBE_WINDOW_MS / 60_000} minutes" +
+                    (if (instrumentRows > 0) ", $instrumentRows of them not startable" else "") +
+                    (if (noBearerRows > 0) ", and $noBearerRows attempts with nothing to test" else "") +
+                    "."
             )
         }
 

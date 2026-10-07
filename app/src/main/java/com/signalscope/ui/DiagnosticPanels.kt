@@ -18,6 +18,7 @@ import com.signalscope.collect.Mobility
 import com.signalscope.collect.HandoverPredictor
 import com.signalscope.collect.InstrumentHealth
 import com.signalscope.collect.CellProbe
+import com.signalscope.collect.MobileData
 import com.signalscope.collect.Fault
 import com.signalscope.collect.LiveState
 import com.signalscope.store.PingPong
@@ -124,7 +125,10 @@ fun ConnectionHealthPanel(compact: Boolean = false) {
     }
 
     val s = stats
-    val v = if (s == null) null else PlainLanguage.connectionHealth(s)
+    // Re-read on every recomposition rather than cached with the stats: the data switch can be
+    // thrown while this panel is open, and the remedy must stop naming a cause that is now fixed.
+    val bearerWhy = MobileData.why(MobileData.state(ctx))
+    val v = if (s == null) null else PlainLanguage.connectionHealth(s, bearerWhy)
 
     SecHead(
         "Connection health",
